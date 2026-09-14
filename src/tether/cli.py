@@ -32,7 +32,14 @@ from tether.docker import (
     remove_image,
     run_container,
 )
-from tether.mounts import ContainerMount, MountError, build_mounts, has_git, resolve_project
+from tether.mounts import (
+    ContainerMount,
+    MountError,
+    aws_credentials_mount,
+    build_mounts,
+    has_git,
+    resolve_project,
+)
 from tether.platform import default_profile_name, find_docker, host_info
 
 console = Console()
@@ -257,6 +264,15 @@ def _launch(
     except MountError as exc:
         console.print(f"[red]mount error:[/] {exc}")
         raise click.exceptions.Exit(code=1) from exc
+
+    if agent_name == "claude" and "CLAUDE_CODE_USE_BEDROCK" in profile_config.env.static:
+        aws_mount = aws_credentials_mount()
+        if aws_mount is not None:
+            mounts.append(aws_mount)
+        else:
+            console.print(
+                "[yellow]warning:[/] Bedrock agent requires ~/.aws but the directory is missing."
+            )
 
     if not has_git(project_dir):
         console.print(

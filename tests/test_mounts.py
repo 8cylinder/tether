@@ -5,7 +5,14 @@ from pathlib import Path
 import pytest
 
 from tether.config import Mount
-from tether.mounts import MountError, build_mounts, has_git, resolve_project
+from tether.mounts import (
+    CONTAINER_AWS_DIR,
+    MountError,
+    aws_credentials_mount,
+    build_mounts,
+    has_git,
+    resolve_project,
+)
 
 
 def test_resolve_project_missing(tmp_path: Path) -> None:
@@ -54,3 +61,20 @@ def test_build_mounts_extra_missing_raises(tmp_path: Path) -> None:
     extra = Mount(source=str(tmp_path / "ghost"), target="/data", mode="ro")
     with pytest.raises(MountError):
         build_mounts(tmp_path, extra=[extra])
+
+
+def test_aws_credentials_mount_when_exists(tmp_path, monkeypatch) -> None:
+    aws_dir = tmp_path / ".aws"
+    aws_dir.mkdir()
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    mount = aws_credentials_mount()
+    assert mount is not None
+    assert mount.source == aws_dir
+    assert mount.target == CONTAINER_AWS_DIR
+    assert mount.mode == "rw"
+
+
+def test_aws_credentials_mount_when_missing(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    mount = aws_credentials_mount()
+    assert mount is None

@@ -90,10 +90,9 @@ passthrough = ["DEEPSEEK_API_KEY"]
 
 [profiles.darwin]
 agent = "claude"
-# macOS Bedrock/SSO authentication is not finalized yet; see design notes.
 
 [profiles.darwin.env]
-static = { CLAUDE_CODE_USE_BEDROCK = "1", AWS_PROFILE = "bedrock" }
+static = { CLAUDE_CODE_USE_BEDROCK = "1", AWS_PROFILE = "bedrock", AWS_DEFAULT_REGION = "us-west-2" }
 """
 
 

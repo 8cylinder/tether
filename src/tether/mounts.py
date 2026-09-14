@@ -9,6 +9,7 @@ from tether.config import Mount
 
 WORKSPACE = "/workspace"
 GIT_DIR = ".git"
+CONTAINER_AWS_DIR = "/tmp/tether-home/.aws"
 
 
 class MountError(ValueError):
@@ -75,3 +76,11 @@ def build_mounts(project: Path, *, extra: list[Mount] | None = None) -> list[Con
         mounts.append(ContainerMount(source=source, target=mount.target, mode=mount.mode))
 
     return mounts
+
+
+def aws_credentials_mount() -> ContainerMount | None:
+    """Return a read-write mount for ``~/.aws`` if the directory exists."""
+    aws_dir = Path.home() / ".aws"
+    if not aws_dir.is_dir():
+        return None
+    return ContainerMount(source=aws_dir, target=CONTAINER_AWS_DIR, mode="rw")
