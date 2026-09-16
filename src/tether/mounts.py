@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import os
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,7 +12,8 @@ from tether.config import Mount
 
 WORKSPACE = "/workspace"
 GIT_DIR = ".git"
-CONTAINER_AWS_DIR = "/tmp/tether-home/.aws"
+CONTAINER_CLAUDE_DIR = "/tmp/tether-home/.claude"
+CONTAINER_CLAUDE_JSON = "/tmp/tether-home/.claude.json"
 
 
 class MountError(ValueError):
@@ -78,9 +82,52 @@ def build_mounts(project: Path, *, extra: list[Mount] | None = None) -> list[Con
     return mounts
 
 
-def aws_credentials_mount() -> ContainerMount | None:
-    """Return a read-write mount for ``~/.aws`` if the directory exists."""
-    aws_dir = Path.home() / ".aws"
-    if not aws_dir.is_dir():
+_SETTINGS_KEYS_TO_STRIP = {"env", "awsAuthRefresh"}
+
+CONTAINER_CLAUDE_SETTINGS = f"{CONTAINER_CLAUDE_DIR}/settings.json"
+
+
+def _filter_claude_settings(source: Path) -> Path | None:
+    """Read *source*, strip keys that conflict with container auth, write a temp copy."""
+    try:
+        data = json.loads(source.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
         return None
-    return ContainerMount(source=aws_dir, target=CONTAINER_AWS_DIR, mode="rw")
+    changed = False
+    for key in _SETTINGS_KEYS_TO_STRIP:
+        if key in data:
+            del data[key]
+            changed = True
+    if not changed:
+        return None
+    handle, name = tempfile.mkstemp(prefix="tether-claude-settings-", suffix=".json")
+    with os.fdopen(handle, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+        f.write("\n")
+    return Path(name)
+
+
+def claude_config_mounts() -> tuple[list[ContainerMount], list[Path]]:
+    """Return read-write mounts for Claude Code config and any temp files to clean up.
+
+    Mounts ``~/.claude/`` and ``~/.claude.json``.  If ``~/.claude/settings.json``
+    contains keys that conflict with container auth (``env``, ``awsAuthRefresh``),
+    a filtered copy is mounted on top of the original.
+    """
+    mounts: list[ContainerMount] = []
+    temp_files: list[Path] = []
+    claude_dir = Path.home() / ".claude"
+    if claude_dir.is_dir():
+        mounts.append(ContainerMount(source=claude_dir, target=CONTAINER_CLAUDE_DIR, mode="rw"))
+        settings = claude_dir / "settings.json"
+        if settings.is_file():
+            filtered = _filter_claude_settings(settings)
+            if filtered is not None:
+                mounts.append(
+                    ContainerMount(source=filtered, target=CONTAINER_CLAUDE_SETTINGS, mode="ro")
+                )
+                temp_files.append(filtered)
+    claude_json = Path.home() / ".claude.json"
+    if claude_json.is_file():
+        mounts.append(ContainerMount(source=claude_json, target=CONTAINER_CLAUDE_JSON, mode="rw"))
+    return mounts, temp_files

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shlex
 import subprocess
 import sys
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path
 
 import click
@@ -15,7 +17,14 @@ from rich.table import Table
 
 from tether import __version__
 from tether.agents import AGENTS, get_agent
-from tether.auth import AuthError, collect_env, env_file
+from tether.auth import (
+    AuthError,
+    AwsCredentials,
+    aws_credential_env,
+    collect_env,
+    env_file,
+    resolve_aws_credentials,
+)
 from tether.config import (
     Config,
     EnvConfig,
@@ -28,15 +37,17 @@ from tether.docker import (
     RunConfig,
     build_image,
     build_run_command,
+    exec_in_container,
     image_exists,
+    list_tether_containers,
     remove_image,
     run_container,
 )
 from tether.mounts import (
     ContainerMount,
     MountError,
-    aws_credentials_mount,
     build_mounts,
+    claude_config_mounts,
     has_git,
     resolve_project,
 )
@@ -119,6 +130,17 @@ def doctor() -> None:
     console.print(f"profile:  {profile_name} -> agent={profile.agent}")
     console.print(f"image:    {config.image} ({_image_status(config.image)})")
     _print_env_status(profile.env)
+
+    if profile.aws_credential_export is not None:
+        export = profile.aws_credential_export
+        console.print(
+            f"aws:      profile={export.profile} region={export.region} [dim](credential export)[/]"
+        )
+    elif "CLAUDE_CODE_USE_BEDROCK" in profile.env.static and "AWS_PROFILE" in profile.env.static:
+        console.print(
+            "[yellow]hint:[/] migrate to [bold]aws_credential_export[/] "
+            "in your profile for automatic SSO credential handling"
+        )
 
 
 @app.command()
@@ -237,6 +259,65 @@ def clean(yes: bool, force: bool) -> None:
         raise click.exceptions.Exit(code=1)
 
 
+@app.command()
+@click.argument("container", required=False, default=None)
+@click.option("--profile", default=None, help="Config profile to use (default: platform name).")
+def refresh(container: str | None, profile: str | None) -> None:
+    """Refresh AWS credentials in a running container."""
+    config = _load_config()
+    profile_name = profile or default_profile_name()
+    profile_config = config.profile_for(profile_name)
+
+    if profile_config.aws_credential_export is None:
+        console.print("[red]error:[/] no aws_credential_export configured in this profile")
+        raise click.exceptions.Exit(code=1)
+
+    if container is None:
+        containers = list_tether_containers()
+        if not containers:
+            console.print("[red]error:[/] no running tether containers found")
+            raise click.exceptions.Exit(code=1)
+        if len(containers) == 1:
+            container = containers[0]
+        else:
+            console.print("Running tether containers:")
+            for name in containers:
+                console.print(f"  {name}")
+            console.print("\nSpecify a container: tether refresh <name>")
+            raise click.exceptions.Exit(code=1)
+
+    try:
+        creds = resolve_aws_credentials(profile_config.aws_credential_export)
+    except AuthError as exc:
+        console.print(f"[red]auth error:[/] {exc}")
+        raise click.exceptions.Exit(code=1) from exc
+
+    creds_ini = (
+        "[default]\n"
+        f"aws_access_key_id = {creds.access_key_id}\n"
+        f"aws_secret_access_key = {creds.secret_access_key}\n"
+        f"aws_session_token = {creds.session_token}\n"
+        f"region = {creds.region}\n"
+    )
+
+    try:
+        exec_in_container(
+            container,
+            (
+                "sh",
+                "-c",
+                "mkdir -p /tmp/tether-home/.aws && cat > /tmp/tether-home/.aws/credentials",
+            ),
+            input_data=creds_ini,
+        )
+    except DockerError as exc:
+        console.print(f"[red]error:[/] {exc}")
+        raise click.exceptions.Exit(code=1) from exc
+
+    _print_expiry(creds)
+    console.print(f"[green]Credentials refreshed[/] in container [bold]{container}[/]")
+
+
 def _launch(
     *,
     agent: str | None,
@@ -265,14 +346,22 @@ def _launch(
         console.print(f"[red]mount error:[/] {exc}")
         raise click.exceptions.Exit(code=1) from exc
 
-    if agent_name == "claude" and "CLAUDE_CODE_USE_BEDROCK" in profile_config.env.static:
-        aws_mount = aws_credentials_mount()
-        if aws_mount is not None:
-            mounts.append(aws_mount)
-        else:
-            console.print(
-                "[yellow]warning:[/] Bedrock agent requires ~/.aws but the directory is missing."
-            )
+    claude_temp_files: list[Path] = []
+    if agent_name == "claude":
+        claude_mounts, claude_temp_files = claude_config_mounts()
+        mounts.extend(claude_mounts)
+
+    aws_env: dict[str, str] = {}
+    container_name: str | None = None
+    if profile_config.aws_credential_export is not None:
+        try:
+            creds = resolve_aws_credentials(profile_config.aws_credential_export)
+        except AuthError as exc:
+            console.print(f"[red]auth error:[/] {exc}")
+            raise click.exceptions.Exit(code=1) from exc
+        aws_env = aws_credential_env(creds)
+        _print_expiry(creds)
+        container_name = _container_name(project or Path.cwd())
 
     if not has_git(project_dir):
         console.print(
@@ -285,6 +374,7 @@ def _launch(
     except AuthError as exc:
         console.print(f"[red]auth error:[/] {exc}")
         raise click.exceptions.Exit(code=1) from exc
+    env_values.update(aws_env)
 
     if not _ensure_image(config.image, no_build=no_build, dry_run=dry_run):
         raise click.exceptions.Exit(code=1)
@@ -300,6 +390,7 @@ def _launch(
         command=full_command,
         mounts=tuple(mounts),
         user=user,
+        name=container_name,
         memory=profile_config.resources.memory,
         cpus=profile_config.resources.cpus,
         pids_limit=profile_config.resources.pids_limit,
@@ -321,6 +412,9 @@ def _launch(
     except (DockerError, AuthError) as exc:
         console.print(f"[red]error:[/] {exc}")
         raise click.exceptions.Exit(code=1) from exc
+    finally:
+        for tmp in claude_temp_files:
+            tmp.unlink(missing_ok=True)
     raise click.exceptions.Exit(code=code)
 
 
@@ -383,6 +477,24 @@ def _print_plan(
     console.print(table)
     console.print("[bold]docker command:[/]")
     console.print(shlex.join(docker_command))
+
+
+def _print_expiry(creds: AwsCredentials) -> None:
+    if creds.expiration is None:
+        return
+    remaining = creds.expiration - datetime.now(UTC)
+    seconds = int(remaining.total_seconds())
+    if seconds <= 0:
+        console.print("[yellow]warning:[/] AWS credentials are already expired")
+        return
+    hours, remainder = divmod(seconds, 3600)
+    minutes = remainder // 60
+    console.print(f"[dim]AWS credentials expire in {hours}h {minutes}m[/]")
+
+
+def _container_name(project: Path) -> str:
+    digest = hashlib.sha256(str(project.resolve()).encode()).hexdigest()[:8]
+    return f"tether-{project.resolve().name}-{digest}"
 
 
 def _docker_version(docker: str) -> str:

@@ -21,7 +21,7 @@ class AgentSpec:
 AGENTS: dict[str, AgentSpec] = {
     "claude": AgentSpec(
         name="claude",
-        command=("claude", "--dangerously-skip-permissions"),
+        command=("claude", "--permission-mode", "plan"),
         description="Anthropic Claude Code",
     ),
     "opencode": AgentSpec(

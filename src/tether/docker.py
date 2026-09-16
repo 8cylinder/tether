@@ -96,6 +96,7 @@ class RunConfig:
     workdir: str = "/workspace"
     env_file: str | None = None
     user: str | None = None
+    name: str | None = None
     memory: str | None = None
     cpus: str | None = None
     pids_limit: int | None = None
@@ -106,6 +107,8 @@ class RunConfig:
 def build_run_command(config: RunConfig, *, docker: str = "docker") -> list[str]:
     """Build the ``docker run`` argv for *config*."""
     command = [docker, "run", "--rm"]
+    if config.name:
+        command += ["--name", config.name]
     if config.interactive:
         command.append("--interactive")
     if config.tty:
@@ -147,6 +150,50 @@ def run_container(config: RunConfig) -> int:
     except OSError as exc:
         raise DockerError(f"failed to run docker: {exc}") from exc
     return result.returncode
+
+
+def exec_in_container(
+    name: str,
+    command: tuple[str, ...],
+    *,
+    input_data: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run a command inside a running container via ``docker exec``.
+
+    Raises:
+        DockerError: when Docker is unavailable or the exec fails.
+    """
+    docker = require_docker()
+    argv = [docker, "exec", "--interactive", name, *command]
+    try:
+        return subprocess.run(
+            argv,
+            input=input_data,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=30,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise DockerError(
+            f"docker exec in {name} failed (exit {exc.returncode}): {exc.stderr.strip()}"
+        ) from exc
+    except OSError as exc:
+        raise DockerError(f"failed to run docker exec: {exc}") from exc
+
+
+def list_tether_containers() -> list[str]:
+    """Return names of running containers whose name starts with ``tether-``."""
+    docker = require_docker()
+    result = subprocess.run(
+        [docker, "ps", "--filter", "name=tether-", "--format", "{{.Names}}"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return []
+    return [n.strip() for n in result.stdout.splitlines() if n.strip()]
 
 
 def remove_image(image: str, *, force: bool = False) -> bool:

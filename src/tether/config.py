@@ -39,6 +39,13 @@ class Resources(BaseModel):
     pids_limit: int = 1024
 
 
+class AwsCredentialExport(BaseModel):
+    """Export AWS credentials via ``aws configure export-credentials``."""
+
+    profile: str
+    region: str = "us-west-2"
+
+
 class Profile(BaseModel):
     """Per-platform runtime settings."""
 
@@ -46,6 +53,7 @@ class Profile(BaseModel):
     env: EnvConfig = Field(default_factory=EnvConfig)
     mounts: list[Mount] = Field(default_factory=list)
     resources: Resources = Field(default_factory=Resources)
+    aws_credential_export: AwsCredentialExport | None = None
 
 
 class Config(BaseModel):
@@ -92,7 +100,11 @@ passthrough = ["DEEPSEEK_API_KEY"]
 agent = "claude"
 
 [profiles.darwin.env]
-static = { CLAUDE_CODE_USE_BEDROCK = "1", AWS_PROFILE = "bedrock", AWS_DEFAULT_REGION = "us-west-2" }
+static = { CLAUDE_CODE_USE_BEDROCK = "1" }
+
+[profiles.darwin.aws_credential_export]
+profile = "bedrock"
+region = "us-west-2"
 """
 
 

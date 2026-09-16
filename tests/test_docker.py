@@ -13,7 +13,7 @@ def _mount(tmp_path: Path) -> ContainerMount:
 def test_build_run_command_hardening(tmp_path: Path) -> None:
     config = RunConfig(
         image="tether:latest",
-        command=("claude", "--dangerously-skip-permissions"),
+        command=("claude", "--permission-mode", "plan"),
         mounts=(_mount(tmp_path),),
         user="1000:1000",
         memory="4g",
@@ -34,7 +34,7 @@ def test_build_run_command_hardening(tmp_path: Path) -> None:
     assert command[command.index("--cpus") + 1] == "2"
     assert f"{tmp_path}:/workspace:rw" in command
     assert "--tty" not in command
-    assert command[-2:] == ["claude", "--dangerously-skip-permissions"]
+    assert command[-3:] == ["claude", "--permission-mode", "plan"]
 
 
 def test_build_run_command_minimal(tmp_path: Path) -> None:
@@ -69,3 +69,20 @@ def test_build_run_command_without_env_file(tmp_path: Path) -> None:
     config = RunConfig(image="img", command=("bash",), mounts=(_mount(tmp_path),))
     command = build_run_command(config, docker="docker")
     assert "--env-file" not in command
+
+
+def test_build_run_command_with_name(tmp_path: Path) -> None:
+    config = RunConfig(
+        image="img",
+        command=("bash",),
+        mounts=(_mount(tmp_path),),
+        name="tether-myproject-abc123",
+    )
+    command = build_run_command(config, docker="docker")
+    assert command[command.index("--name") + 1] == "tether-myproject-abc123"
+
+
+def test_build_run_command_without_name(tmp_path: Path) -> None:
+    config = RunConfig(image="img", command=("bash",), mounts=(_mount(tmp_path),))
+    command = build_run_command(config, docker="docker")
+    assert "--name" not in command

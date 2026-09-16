@@ -6,10 +6,12 @@ import pytest
 
 from tether.config import Mount
 from tether.mounts import (
-    CONTAINER_AWS_DIR,
+    CONTAINER_CLAUDE_DIR,
+    CONTAINER_CLAUDE_JSON,
+    CONTAINER_CLAUDE_SETTINGS,
     MountError,
-    aws_credentials_mount,
     build_mounts,
+    claude_config_mounts,
     has_git,
     resolve_project,
 )
@@ -63,18 +65,74 @@ def test_build_mounts_extra_missing_raises(tmp_path: Path) -> None:
         build_mounts(tmp_path, extra=[extra])
 
 
-def test_aws_credentials_mount_when_exists(tmp_path, monkeypatch) -> None:
-    aws_dir = tmp_path / ".aws"
-    aws_dir.mkdir()
+def test_claude_config_mounts_both_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir()
+    claude_json = tmp_path / ".claude.json"
+    claude_json.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
-    mount = aws_credentials_mount()
-    assert mount is not None
-    assert mount.source == aws_dir
-    assert mount.target == CONTAINER_AWS_DIR
-    assert mount.mode == "rw"
+    mounts, temp_files = claude_config_mounts()
+    assert len(mounts) == 2
+    assert mounts[0].source == claude_dir
+    assert mounts[0].target == CONTAINER_CLAUDE_DIR
+    assert mounts[0].mode == "rw"
+    assert mounts[1].source == claude_json
+    assert mounts[1].target == CONTAINER_CLAUDE_JSON
+    assert mounts[1].mode == "rw"
+    assert temp_files == []
 
 
-def test_aws_credentials_mount_when_missing(tmp_path, monkeypatch) -> None:
+def test_claude_config_mounts_dir_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / ".claude").mkdir()
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
-    mount = aws_credentials_mount()
-    assert mount is None
+    mounts, _ = claude_config_mounts()
+    assert len(mounts) == 1
+    assert mounts[0].target == CONTAINER_CLAUDE_DIR
+
+
+def test_claude_config_mounts_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    mounts, temp_files = claude_config_mounts()
+    assert mounts == []
+    assert temp_files == []
+
+
+def test_claude_config_mounts_filters_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir()
+    settings = claude_dir / "settings.json"
+    settings.write_text(
+        '{"theme": "dark", "env": {"FOO": "bar"}, "awsAuthRefresh": "aws sso login"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    mounts, temp_files = claude_config_mounts()
+    assert len(mounts) == 2
+    assert mounts[0].target == CONTAINER_CLAUDE_DIR
+    assert mounts[1].target == CONTAINER_CLAUDE_SETTINGS
+    assert mounts[1].mode == "ro"
+    assert len(temp_files) == 1
+    import json
+
+    filtered = json.loads(temp_files[0].read_text(encoding="utf-8"))
+    assert "theme" in filtered
+    assert "env" not in filtered
+    assert "awsAuthRefresh" not in filtered
+    for f in temp_files:
+        f.unlink(missing_ok=True)
+
+
+def test_claude_config_mounts_no_filter_needed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir()
+    settings = claude_dir / "settings.json"
+    settings.write_text('{"theme": "dark", "model": "opus"}', encoding="utf-8")
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    mounts, temp_files = claude_config_mounts()
+    assert len(mounts) == 1
+    assert mounts[0].target == CONTAINER_CLAUDE_DIR
+    assert temp_files == []

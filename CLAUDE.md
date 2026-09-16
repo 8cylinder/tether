@@ -29,7 +29,7 @@ The CLI (`cli.py`) is a Click group with commands: `init`, `build`, `run`, `shel
 
 3. **mounts.py** — Builds the mount policy: project at `/workspace:rw`, `.git` overlay at `/workspace/.git:ro`, plus user-configured extra mounts. The read-only `.git` overlay is the core safety mechanism.
 
-4. **auth.py** — Merges static env vars with host passthrough vars, writes them to a mode-0600 temp file used via `--env-file` (secrets never on the command line), and cleans up on exit.
+4. **auth.py** — Merges static env vars with host passthrough vars, writes them to a mode-0600 temp file used via `--env-file` (secrets never on the command line), and cleans up on exit. Also handles AWS credential export: runs `aws configure export-credentials` on the host, parses STS tokens, and auto-triggers SSO login when needed.
 
 5. **docker.py** — Builds and runs the `docker run` command with hardening flags (`--cap-drop ALL`, `--security-opt no-new-privileges`, resource limits). Also handles image build/inspect/remove.
 
@@ -45,4 +45,4 @@ The CLI (`cli.py`) is a Click group with commands: `init`, `build`, `run`, `shel
 - Tests use `pytest` with `tmp_path` fixtures. No Docker required for tests — they exercise the logic layers (config parsing, mount building, command construction, env-file handling) without calling Docker.
 - Pydantic models for config, frozen dataclasses with `slots=True` for internal value types (`ContainerMount`, `RunConfig`, `BuildResult`, `HostInfo`, `AgentSpec`).
 - `from __future__ import annotations` in every module.
-- macOS credential handling (Bedrock/SSO) is explicitly deferred and not yet implemented.
+- macOS Bedrock/SSO credentials are exported via `aws configure export-credentials` at launch and injected as env vars. Mid-session refresh is supported via `tether refresh`, which writes an AWS credentials file into the running container.
