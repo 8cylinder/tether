@@ -89,7 +89,6 @@ def test_claude_config_mounts_both_exist(tmp_path: Path, monkeypatch: pytest.Mon
     assert filtered["statusLine"] == _TETHER_STATUS_LINE
     assert filtered["sandbox"] == {"enabled": False}
     assert filtered["permissions"] == {"allow": ["Bash(*)"], "deny": ["Edit", "Write"]}
-    assert filtered["autoUpdaterStatus"] == "disabled"
     for f in temp_files:
         f.unlink(missing_ok=True)
 
@@ -108,7 +107,6 @@ def test_claude_config_mounts_dir_only(tmp_path: Path, monkeypatch: pytest.Monke
     assert filtered["statusLine"] == _TETHER_STATUS_LINE
     assert filtered["sandbox"] == {"enabled": False}
     assert filtered["permissions"] == {"allow": ["Bash(*)"], "deny": ["Edit", "Write"]}
-    assert filtered["autoUpdaterStatus"] == "disabled"
     for f in temp_files:
         f.unlink(missing_ok=True)
 
@@ -147,7 +145,6 @@ def test_claude_config_mounts_filters_settings(
     assert filtered["statusLine"] == _TETHER_STATUS_LINE
     assert filtered["sandbox"] == {"enabled": False}
     assert filtered["permissions"] == {"allow": ["Bash(*)"], "deny": ["Edit", "Write"]}
-    assert filtered["autoUpdaterStatus"] == "disabled"
     for f in temp_files:
         f.unlink(missing_ok=True)
 
@@ -172,6 +169,5 @@ def test_claude_config_mounts_clean_settings_gets_statusline(
     assert filtered["statusLine"] == _TETHER_STATUS_LINE
     assert filtered["sandbox"] == {"enabled": False}
     assert filtered["permissions"] == {"allow": ["Bash(*)"], "deny": ["Edit", "Write"]}
-    assert filtered["autoUpdaterStatus"] == "disabled"
     for f in temp_files:
         f.unlink(missing_ok=True)

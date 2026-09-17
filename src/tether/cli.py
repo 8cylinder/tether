@@ -197,6 +197,7 @@ def run(
         no_build=no_build,
         command=None,
         args=args,
+        named=True,
     )
 
 
@@ -228,6 +229,7 @@ def shell(
         no_build=no_build,
         command=("bash",),
         args=args,
+        named=False,
     )
 
 
@@ -328,6 +330,7 @@ def _launch(
     no_build: bool,
     command: tuple[str, ...] | None,
     args: tuple[str, ...],
+    named: bool = True,
 ) -> None:
     config = _load_config()
     profile_name = profile or default_profile_name()
@@ -362,7 +365,8 @@ def _launch(
             raise click.exceptions.Exit(code=1) from exc
         aws_env = aws_credential_env(creds)
         _print_expiry(creds)
-        container_name = _container_name(project or Path.cwd())
+        if named:
+            container_name = _container_name(project or Path.cwd())
 
     if not has_git(project_dir):
         console.print(
@@ -376,6 +380,8 @@ def _launch(
         console.print(f"[red]auth error:[/] {exc}")
         raise click.exceptions.Exit(code=1) from exc
     env_values.update(aws_env)
+    if agent_name == "claude":
+        env_values["DISABLE_AUTOUPDATER"] = "1"
 
     if not _ensure_image(config.image, no_build=no_build, dry_run=dry_run):
         raise click.exceptions.Exit(code=1)

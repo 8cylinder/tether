@@ -100,7 +100,6 @@ def _filter_claude_settings(source: Path) -> Path:
     data["statusLine"] = _TETHER_STATUS_LINE
     data["sandbox"] = {"enabled": False}
     data["permissions"] = {"allow": ["Bash(*)"], "deny": ["Edit", "Write"]}
-    data["autoUpdaterStatus"] = "disabled"
     handle, name = tempfile.mkstemp(prefix="tether-claude-settings-", suffix=".json")
     with os.fdopen(handle, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)

@@ -148,7 +148,7 @@ with the following adjustments:
 - **Permissions** — `Bash(*)` is allowed; `Edit` and `Write` are denied, so
   Claude can run any shell command freely but must ask before modifying project
   files directly.
-- **Auto-update disabled** (`autoUpdaterStatus: disabled`) — the container
+- **Auto-update disabled** (`DISABLE_AUTOUPDATER=1` env var) — the container
   image pins the Claude version, and the npm prefix is not writable.
 - **Status line** — a tether indicator is injected.
 - **Conflicting keys stripped** — `env`, `awsAuthRefresh`, `permissions`, and
