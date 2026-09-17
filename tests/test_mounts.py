@@ -66,6 +66,21 @@ def test_build_mounts_extra_missing_raises(tmp_path: Path) -> None:
         build_mounts(tmp_path, extra=[extra])
 
 
+def test_build_mounts_denies_dangerous_source(tmp_path: Path) -> None:
+    extra = Mount(source="/", target="/host", mode="ro")
+    with pytest.raises(MountError, match="dangerous"):
+        build_mounts(tmp_path, extra=[extra])
+
+
+def test_build_mounts_denies_ssh_dir(tmp_path: Path) -> None:
+    ssh_dir = Path.home() / ".ssh"
+    if not ssh_dir.exists():
+        pytest.skip("~/.ssh does not exist")
+    extra = Mount(source="~/.ssh", target="/ssh", mode="ro")
+    with pytest.raises(MountError, match="dangerous"):
+        build_mounts(tmp_path, extra=[extra])
+
+
 def test_claude_config_mounts_both_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     claude_dir = tmp_path / ".claude"
     claude_dir.mkdir()

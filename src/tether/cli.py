@@ -336,11 +336,15 @@ def _launch(
     profile_config = config.profile_for(profile_name)
     agent_name = agent or profile_config.agent
 
-    try:
-        spec = get_agent(agent_name)
-    except KeyError as exc:
-        console.print(f"[red]unknown agent:[/] {agent_name}")
-        raise click.exceptions.Exit(code=1) from exc
+    if command is None:
+        try:
+            spec = get_agent(agent_name)
+        except KeyError as exc:
+            console.print(f"[red]unknown agent:[/] {agent_name}")
+            raise click.exceptions.Exit(code=1) from exc
+        base_command = spec.command
+    else:
+        base_command = command
 
     try:
         project_dir = resolve_project(project or Path.cwd())
@@ -376,6 +380,9 @@ def _launch(
                 if not container_running(candidate):
                     container_name = candidate
 
+        if not _ensure_image(config.image, no_build=no_build, dry_run=dry_run):
+            raise click.exceptions.Exit(code=1)
+
         if not has_git(project_dir):
             console.print(
                 "[yellow]warning:[/] project is not a git repository; "
@@ -391,10 +398,6 @@ def _launch(
         if agent_name == "claude":
             env_values["DISABLE_AUTOUPDATER"] = "1"
 
-        if not _ensure_image(config.image, no_build=no_build, dry_run=dry_run):
-            raise click.exceptions.Exit(code=1)
-
-        base_command = command if command is not None else spec.command
         full_command = (*base_command, *args)
 
         info = host_info()

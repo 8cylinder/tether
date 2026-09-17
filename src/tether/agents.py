@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
 AgentName = Literal["claude", "opencode", "gemini"]
@@ -10,11 +10,10 @@ AgentName = Literal["claude", "opencode", "gemini"]
 
 @dataclass(frozen=True, slots=True)
 class AgentSpec:
-    """How to launch a harness inside the jail and auto-approve its tools."""
+    """How to launch a harness inside the jail."""
 
     name: AgentName
     command: tuple[str, ...]
-    env: dict[str, str] = field(default_factory=dict)
     description: str = ""
 
 

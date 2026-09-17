@@ -53,6 +53,22 @@ def has_git(project: Path) -> bool:
     return (project / GIT_DIR).is_dir()
 
 
+_DENIED_MOUNT_SOURCES = frozenset(
+    Path(p).expanduser().resolve()
+    for p in ("/", "/etc", "/var", "~/.ssh", "~/.aws", "~/.gnupg", "~/.config")
+)
+
+_DENIED_MOUNT_TARGETS = frozenset(("/var/run/docker.sock",))
+
+
+def _check_mount_safety(source: Path, mode: str) -> None:
+    """Raise if *source* is a dangerous path to expose to the agent."""
+    if source in _DENIED_MOUNT_SOURCES:
+        raise MountError(f"refusing to mount dangerous path: {source}")
+    if str(source) in _DENIED_MOUNT_TARGETS:
+        raise MountError(f"refusing to mount dangerous path: {source}")
+
+
 def build_mounts(project: Path, *, extra: list[Mount] | None = None) -> list[ContainerMount]:
     """Build the mount policy for *project*.
 
@@ -78,6 +94,7 @@ def build_mounts(project: Path, *, extra: list[Mount] | None = None) -> list[Con
         source = Path(mount.source).expanduser().resolve()
         if not source.exists():
             raise MountError(f"mount source does not exist: {source}")
+        _check_mount_safety(source, mount.mode)
         mounts.append(ContainerMount(source=source, target=mount.target, mode=mount.mode))
 
     return mounts
