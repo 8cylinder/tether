@@ -33,8 +33,8 @@ RUN npm install --global \
  && npm cache clean --force
 
 # The node image already provides a non-root user named `node` with uid 1000.
-RUN mkdir -p /workspace \
- && chown node:node /workspace
+RUN mkdir -p /workspace /tmp/tether-home \
+ && chown node:node /workspace /tmp/tether-home
 
 COPY entrypoint.sh /usr/local/bin/tether-entrypoint
 RUN chmod 0755 /usr/local/bin/tether-entrypoint

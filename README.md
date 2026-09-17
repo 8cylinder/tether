@@ -18,8 +18,9 @@ bounded. `tether` bounds it:
 - The host filesystem outside the project is **not visible** inside the jail.
 - `.git` is mounted read-only, so history and the object database cannot be
   rewritten or deleted — even by `rm -rf /workspace`.
-- Each agent runs with its auto-approve mode enabled
-  (`--dangerously-skip-permissions`, `--auto`, `--yolo`).
+- Each agent runs with permissive flags: `opencode --auto`, `gemini --yolo`,
+  and `claude --permission-mode plan` (plan mode lets Claude run bash freely
+  but asks before editing files).
 
 ## Requirements
 
@@ -27,8 +28,8 @@ bounded. `tether` bounds it:
 - Docker (Docker Desktop on macOS; Docker Engine on Linux)
 - Python 3.11+ and [uv](https://docs.astral.sh/uv/) to install/run the CLI
 
-`tether` currently targets Docker only. macOS Bedrock/SSO credential handling is
-not implemented yet; see [Credentials](#credentials).
+`tether` targets Docker only. macOS Bedrock credentials are handled via
+`aws configure export-credentials`; see [Credentials](#credentials).
 
 ## Install
 
@@ -70,6 +71,7 @@ tether run --dry-run
 | `tether run [options] [-- ARGS...]` | Launch an agent inside the jail. |
 | `tether shell [options] [-- ARGS...]` | Open a shell inside the jail (useful for debugging). |
 | `tether doctor` | Report host, Docker, config, image, and credential readiness. |
+| `tether refresh [CONTAINER]` | Refresh AWS credentials in a running container. |
 | `tether clean [-y] [--force]` | Remove the configured image. |
 
 `run`/`shell` options:
@@ -102,7 +104,11 @@ passthrough = ["DEEPSEEK_API_KEY"]   # read from the host environment
 agent = "claude"
 
 [profiles.darwin.env]
-static = { CLAUDE_CODE_USE_BEDROCK = "1", AWS_PROFILE = "bedrock" }
+static = { CLAUDE_CODE_USE_BEDROCK = "1" }
+
+[profiles.darwin.aws_credential_export]
+profile = "bedrock"
+region = "us-west-2"
 ```
 
 ### Profile fields
@@ -116,6 +122,8 @@ static = { CLAUDE_CODE_USE_BEDROCK = "1", AWS_PROFILE = "bedrock" }
 | `resources.memory` | `4g` | Container memory limit. |
 | `resources.cpus` | `2` | CPU limit. |
 | `resources.pids_limit` | `1024` | Process limit. |
+| `aws_credential_export.profile` | — | AWS CLI profile for credential export (macOS Bedrock). |
+| `aws_credential_export.region` | `us-west-2` | AWS region for exported credentials. |
 
 ### Extra mounts
 
@@ -127,6 +135,28 @@ mode = "ro"   # or "rw"
 ```
 
 Sources must exist; `~` is expanded. Prefer `ro`.
+
+## Claude Code settings
+
+When the agent is `claude`, tether mounts the host `~/.claude/` directory and
+`~/.claude.json` into the container so that authentication and configuration
+carry over. A filtered copy of `settings.json` is mounted read-only on top,
+with the following adjustments:
+
+- **Sandbox disabled** (`sandbox.enabled: false`) — the container itself is the
+  sandbox, so Claude's internal bash sandbox is redundant.
+- **Permissions** — `Bash(*)` is allowed; `Edit` and `Write` are denied, so
+  Claude can run any shell command freely but must ask before modifying project
+  files directly.
+- **Auto-update disabled** (`autoUpdaterStatus: disabled`) — the container
+  image pins the Claude version, and the npm prefix is not writable.
+- **Status line** — a tether indicator is injected.
+- **Conflicting keys stripped** — `env`, `awsAuthRefresh`, `permissions`, and
+  `sandbox` from the host settings are removed so they don't conflict with
+  tether's container configuration.
+
+These settings only apply inside the container. Your host Claude installation is
+not affected.
 
 ## Safety model
 
@@ -172,7 +202,7 @@ docker run --rm --init --workdir /workspace \
 | Platform | Agent | Mechanism |
 | --- | --- | --- |
 | Linux | `opencode` | `DEEPSEEK_API_KEY` forwarded from the host environment. |
-| macOS | `claude` | **Not finalized** (Bedrock/SSO). |
+| macOS | `claude` | AWS credentials exported via `aws configure export-credentials` and injected as env vars. |
 
 On Linux, export the key before launching:
 
@@ -181,14 +211,32 @@ export DEEPSEEK_API_KEY=sk-...
 tether run
 ```
 
-### macOS (deferred)
+### macOS / Bedrock
 
-The macOS/company Bedrock profile is likely backed by AWS SSO. A read-only
-`~/.aws` mount is fragile with SSO because the AWS SDK writes refreshed tokens
-back to the SSO cache. The planned approaches are host-side
-`aws configure export-credentials` injected via the env-file (no host secrets
-mounted), or a Bedrock API key. This will be implemented when development moves
-to macOS.
+Configure `aws_credential_export` in your profile to use Bedrock via AWS SSO:
+
+```toml
+[profiles.darwin]
+agent = "claude"
+
+[profiles.darwin.env]
+static = { CLAUDE_CODE_USE_BEDROCK = "1" }
+
+[profiles.darwin.aws_credential_export]
+profile = "bedrock"
+region = "us-west-2"
+```
+
+At launch, tether runs `aws configure export-credentials` on the host, parses
+the STS tokens, and injects them as environment variables into the container.
+If SSO credentials have expired, tether triggers `aws sso login` automatically.
+
+STS tokens are short-lived. To refresh credentials in a running container:
+
+```bash
+tether refresh              # auto-detects the running container
+tether refresh tether-myapp-abc123  # target a specific container
+```
 
 ## Development
 
@@ -221,5 +269,5 @@ egress allowlist.
 
 ## Status
 
-Early development. `init`, `build`, `run`, `shell`, `doctor`, and `clean` work
-end-to-end on Linux. macOS credential handling is pending.
+Early development. `init`, `build`, `run`, `shell`, `doctor`, `refresh`, and
+`clean` work end-to-end on Linux and macOS.

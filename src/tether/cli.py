@@ -309,6 +309,7 @@ def refresh(container: str | None, profile: str | None) -> None:
                 "mkdir -p /tmp/tether-home/.aws && cat > /tmp/tether-home/.aws/credentials",
             ),
             input_data=creds_ini,
+            user="1000:1000",
         )
     except DockerError as exc:
         console.print(f"[red]error:[/] {exc}")

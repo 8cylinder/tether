@@ -157,6 +157,7 @@ def exec_in_container(
     command: tuple[str, ...],
     *,
     input_data: str | None = None,
+    user: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Run a command inside a running container via ``docker exec``.
 
@@ -164,7 +165,10 @@ def exec_in_container(
         DockerError: when Docker is unavailable or the exec fails.
     """
     docker = require_docker()
-    argv = [docker, "exec", "--interactive", name, *command]
+    argv = [docker, "exec", "--interactive"]
+    if user:
+        argv += ["--user", user]
+    argv += [name, *command]
     try:
         return subprocess.run(
             argv,

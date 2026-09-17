@@ -6,6 +6,7 @@ import pytest
 
 from tether.config import Mount
 from tether.mounts import (
+    _TETHER_STATUS_LINE,
     CONTAINER_CLAUDE_DIR,
     CONTAINER_CLAUDE_JSON,
     CONTAINER_CLAUDE_SETTINGS,
@@ -72,22 +73,44 @@ def test_claude_config_mounts_both_exist(tmp_path: Path, monkeypatch: pytest.Mon
     claude_json.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
     mounts, temp_files = claude_config_mounts()
-    assert len(mounts) == 2
+    assert len(mounts) == 3
     assert mounts[0].source == claude_dir
     assert mounts[0].target == CONTAINER_CLAUDE_DIR
     assert mounts[0].mode == "rw"
-    assert mounts[1].source == claude_json
-    assert mounts[1].target == CONTAINER_CLAUDE_JSON
-    assert mounts[1].mode == "rw"
-    assert temp_files == []
+    assert mounts[1].target == CONTAINER_CLAUDE_SETTINGS
+    assert mounts[1].mode == "ro"
+    assert mounts[2].source == claude_json
+    assert mounts[2].target == CONTAINER_CLAUDE_JSON
+    assert mounts[2].mode == "rw"
+    assert len(temp_files) == 1
+    import json
+
+    filtered = json.loads(temp_files[0].read_text(encoding="utf-8"))
+    assert filtered["statusLine"] == _TETHER_STATUS_LINE
+    assert filtered["sandbox"] == {"enabled": False}
+    assert filtered["permissions"] == {"allow": ["Bash(*)"], "deny": ["Edit", "Write"]}
+    assert filtered["autoUpdaterStatus"] == "disabled"
+    for f in temp_files:
+        f.unlink(missing_ok=True)
 
 
 def test_claude_config_mounts_dir_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     (tmp_path / ".claude").mkdir()
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
-    mounts, _ = claude_config_mounts()
-    assert len(mounts) == 1
+    mounts, temp_files = claude_config_mounts()
+    assert len(mounts) == 2
     assert mounts[0].target == CONTAINER_CLAUDE_DIR
+    assert mounts[1].target == CONTAINER_CLAUDE_SETTINGS
+    assert len(temp_files) == 1
+    import json
+
+    filtered = json.loads(temp_files[0].read_text(encoding="utf-8"))
+    assert filtered["statusLine"] == _TETHER_STATUS_LINE
+    assert filtered["sandbox"] == {"enabled": False}
+    assert filtered["permissions"] == {"allow": ["Bash(*)"], "deny": ["Edit", "Write"]}
+    assert filtered["autoUpdaterStatus"] == "disabled"
+    for f in temp_files:
+        f.unlink(missing_ok=True)
 
 
 def test_claude_config_mounts_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -104,7 +127,8 @@ def test_claude_config_mounts_filters_settings(
     claude_dir.mkdir()
     settings = claude_dir / "settings.json"
     settings.write_text(
-        '{"theme": "dark", "env": {"FOO": "bar"}, "awsAuthRefresh": "aws sso login"}',
+        '{"theme": "dark", "env": {"FOO": "bar"}, "awsAuthRefresh": "aws sso login",'
+        ' "permissions": {"allow": ["*"]}, "sandbox": {"enabled": true}}',
         encoding="utf-8",
     )
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
@@ -120,11 +144,15 @@ def test_claude_config_mounts_filters_settings(
     assert "theme" in filtered
     assert "env" not in filtered
     assert "awsAuthRefresh" not in filtered
+    assert filtered["statusLine"] == _TETHER_STATUS_LINE
+    assert filtered["sandbox"] == {"enabled": False}
+    assert filtered["permissions"] == {"allow": ["Bash(*)"], "deny": ["Edit", "Write"]}
+    assert filtered["autoUpdaterStatus"] == "disabled"
     for f in temp_files:
         f.unlink(missing_ok=True)
 
 
-def test_claude_config_mounts_no_filter_needed(
+def test_claude_config_mounts_clean_settings_gets_statusline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     claude_dir = tmp_path / ".claude"
@@ -133,6 +161,17 @@ def test_claude_config_mounts_no_filter_needed(
     settings.write_text('{"theme": "dark", "model": "opus"}', encoding="utf-8")
     monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
     mounts, temp_files = claude_config_mounts()
-    assert len(mounts) == 1
-    assert mounts[0].target == CONTAINER_CLAUDE_DIR
-    assert temp_files == []
+    assert len(mounts) == 2
+    assert mounts[1].target == CONTAINER_CLAUDE_SETTINGS
+    assert len(temp_files) == 1
+    import json
+
+    filtered = json.loads(temp_files[0].read_text(encoding="utf-8"))
+    assert filtered["theme"] == "dark"
+    assert filtered["model"] == "opus"
+    assert filtered["statusLine"] == _TETHER_STATUS_LINE
+    assert filtered["sandbox"] == {"enabled": False}
+    assert filtered["permissions"] == {"allow": ["Bash(*)"], "deny": ["Edit", "Write"]}
+    assert filtered["autoUpdaterStatus"] == "disabled"
+    for f in temp_files:
+        f.unlink(missing_ok=True)
