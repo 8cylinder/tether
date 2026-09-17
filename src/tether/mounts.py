@@ -14,6 +14,7 @@ WORKSPACE = "/workspace"
 GIT_DIR = ".git"
 CONTAINER_CLAUDE_DIR = "/tmp/tether-home/.claude"
 CONTAINER_CLAUDE_JSON = "/tmp/tether-home/.claude.json"
+CONTAINER_AWS_CREDENTIALS = "/tmp/tether-home/.aws/credentials"
 
 
 class MountError(ValueError):

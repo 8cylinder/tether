@@ -237,9 +237,9 @@ def test_aws_credential_env() -> None:
         region="us-west-2",
     )
     env = aws_credential_env(creds)
-    assert env["AWS_ACCESS_KEY_ID"] == "AKIA"
-    assert env["AWS_SECRET_ACCESS_KEY"] == "secret"
-    assert env["AWS_SESSION_TOKEN"] == "tok"
+    assert "AWS_ACCESS_KEY_ID" not in env
+    assert "AWS_SECRET_ACCESS_KEY" not in env
+    assert "AWS_SESSION_TOKEN" not in env
     assert env["AWS_REGION"] == "us-west-2"
     assert env["AWS_DEFAULT_REGION"] == "us-west-2"
     assert env["AWS_PAGER"] == ""

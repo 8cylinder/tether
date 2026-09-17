@@ -216,26 +216,32 @@ def resolve_aws_credentials(export_config: AwsCredentialExport) -> AwsCredential
 
 
 def aws_credential_env(creds: AwsCredentials) -> dict[str, str]:
-    """Convert *creds* to environment variables for the container."""
+    """Return non-secret AWS env vars (region, pager) for the container.
+
+    Credential keys are deliberately excluded so they can be delivered via
+    the credentials file, which ``tether refresh`` can overwrite at runtime.
+    """
     return {
-        "AWS_ACCESS_KEY_ID": creds.access_key_id,
-        "AWS_SECRET_ACCESS_KEY": creds.secret_access_key,
-        "AWS_SESSION_TOKEN": creds.session_token,
         "AWS_REGION": creds.region,
         "AWS_DEFAULT_REGION": creds.region,
         "AWS_PAGER": "",
     }
 
 
-def write_aws_credentials_file(creds: AwsCredentials, path: Path) -> None:
-    """Write an INI-format AWS credentials file to *path* with mode 0600."""
-    content = (
+def aws_credentials_ini(creds: AwsCredentials) -> str:
+    """Format *creds* as an INI-style AWS credentials file."""
+    return (
         "[default]\n"
         f"aws_access_key_id = {creds.access_key_id}\n"
         f"aws_secret_access_key = {creds.secret_access_key}\n"
         f"aws_session_token = {creds.session_token}\n"
         f"region = {creds.region}\n"
     )
+
+
+def write_aws_credentials_file(creds: AwsCredentials, path: Path) -> None:
+    """Write an INI-format AWS credentials file to *path* with mode 0600."""
+    content = aws_credentials_ini(creds)
     handle, name = tempfile.mkstemp(prefix="tether-aws-", suffix=".ini")
     tmp = Path(name)
     try:
@@ -246,4 +252,16 @@ def write_aws_credentials_file(creds: AwsCredentials, path: Path) -> None:
         raise
     if path != tmp:
         tmp.replace(path)
-    return
+
+
+def write_aws_credentials_temp(creds: AwsCredentials) -> Path:
+    """Write credentials to a temp file and return the path (caller cleans up)."""
+    content = aws_credentials_ini(creds)
+    handle, name = tempfile.mkstemp(prefix="tether-aws-creds-", suffix=".ini")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as stream:
+            stream.write(content)
+    except Exception:
+        Path(name).unlink(missing_ok=True)
+        raise
+    return Path(name)

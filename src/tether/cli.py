@@ -21,9 +21,11 @@ from tether.auth import (
     AuthError,
     AwsCredentials,
     aws_credential_env,
+    aws_credentials_ini,
     collect_env,
     env_file,
     resolve_aws_credentials,
+    write_aws_credentials_temp,
 )
 from tether.config import (
     Config,
@@ -44,6 +46,7 @@ from tether.docker import (
     run_container,
 )
 from tether.mounts import (
+    CONTAINER_AWS_CREDENTIALS,
     ContainerMount,
     MountError,
     build_mounts,
@@ -294,13 +297,8 @@ def refresh(container: str | None, profile: str | None) -> None:
         console.print(f"[red]auth error:[/] {exc}")
         raise click.exceptions.Exit(code=1) from exc
 
-    creds_ini = (
-        "[default]\n"
-        f"aws_access_key_id = {creds.access_key_id}\n"
-        f"aws_secret_access_key = {creds.secret_access_key}\n"
-        f"aws_session_token = {creds.session_token}\n"
-        f"region = {creds.region}\n"
-    )
+    info = host_info()
+    user = f"{info.uid}:{info.gid}" if info.system == LINUX else None
 
     try:
         exec_in_container(
@@ -308,10 +306,10 @@ def refresh(container: str | None, profile: str | None) -> None:
             (
                 "sh",
                 "-c",
-                "mkdir -p /tmp/tether-home/.aws && cat > /tmp/tether-home/.aws/credentials",
+                f"mkdir -p /tmp/tether-home/.aws && cat > {CONTAINER_AWS_CREDENTIALS}",
             ),
-            input_data=creds_ini,
-            user="1000:1000",
+            input_data=aws_credentials_ini(creds),
+            user=user,
         )
     except DockerError as exc:
         console.print(f"[red]error:[/] {exc}")
@@ -350,79 +348,86 @@ def _launch(
         console.print(f"[red]mount error:[/] {exc}")
         raise click.exceptions.Exit(code=1) from exc
 
-    claude_temp_files: list[Path] = []
-    if agent_name == "claude":
-        claude_mounts, claude_temp_files = claude_config_mounts()
-        mounts.extend(claude_mounts)
+    temp_files: list[Path] = []
+    try:
+        if agent_name == "claude":
+            claude_mounts, claude_temps = claude_config_mounts()
+            mounts.extend(claude_mounts)
+            temp_files.extend(claude_temps)
 
-    aws_env: dict[str, str] = {}
-    container_name: str | None = None
-    if profile_config.aws_credential_export is not None:
+        aws_env: dict[str, str] = {}
+        container_name: str | None = None
+        if profile_config.aws_credential_export is not None:
+            try:
+                creds = resolve_aws_credentials(profile_config.aws_credential_export)
+            except AuthError as exc:
+                console.print(f"[red]auth error:[/] {exc}")
+                raise click.exceptions.Exit(code=1) from exc
+            aws_env = aws_credential_env(creds)
+            creds_file = write_aws_credentials_temp(creds)
+            temp_files.append(creds_file)
+            mounts.append(
+                ContainerMount(source=creds_file, target=CONTAINER_AWS_CREDENTIALS, mode="rw")
+            )
+            _print_expiry(creds)
+            if named:
+                container_name = _container_name(project or Path.cwd())
+
+        if not has_git(project_dir):
+            console.print(
+                "[yellow]warning:[/] project is not a git repository; "
+                "changes cannot be recovered from git."
+            )
+
         try:
-            creds = resolve_aws_credentials(profile_config.aws_credential_export)
+            env_values = collect_env(profile_config.env)
         except AuthError as exc:
             console.print(f"[red]auth error:[/] {exc}")
             raise click.exceptions.Exit(code=1) from exc
-        aws_env = aws_credential_env(creds)
-        _print_expiry(creds)
-        if named:
-            container_name = _container_name(project or Path.cwd())
+        env_values.update(aws_env)
+        if agent_name == "claude":
+            env_values["DISABLE_AUTOUPDATER"] = "1"
 
-    if not has_git(project_dir):
-        console.print(
-            "[yellow]warning:[/] project is not a git repository; "
-            "changes cannot be recovered from git."
+        if not _ensure_image(config.image, no_build=no_build, dry_run=dry_run):
+            raise click.exceptions.Exit(code=1)
+
+        base_command = command if command is not None else spec.command
+        full_command = (*base_command, *args)
+
+        info = host_info()
+        user = f"{info.uid}:{info.gid}" if info.system == LINUX else None
+
+        run_config = RunConfig(
+            image=config.image,
+            command=full_command,
+            mounts=tuple(mounts),
+            user=user,
+            name=container_name,
+            memory=profile_config.resources.memory,
+            cpus=profile_config.resources.cpus,
+            pids_limit=profile_config.resources.pids_limit,
+            tty=sys.stdin.isatty() and sys.stdout.isatty(),
         )
 
-    try:
-        env_values = collect_env(profile_config.env)
-    except AuthError as exc:
-        console.print(f"[red]auth error:[/] {exc}")
-        raise click.exceptions.Exit(code=1) from exc
-    env_values.update(aws_env)
-    if agent_name == "claude":
-        env_values["DISABLE_AUTOUPDATER"] = "1"
+        docker = find_docker() or "docker"
 
-    if not _ensure_image(config.image, no_build=no_build, dry_run=dry_run):
-        raise click.exceptions.Exit(code=1)
+        if dry_run:
+            plan_config = replace(run_config, env_file="<env-file>") if env_values else run_config
+            docker_command = build_run_command(plan_config, docker=docker)
+            _print_plan(agent_name, project_dir, mounts, sorted(env_values), docker_command)
+            return
 
-    base_command = command if command is not None else spec.command
-    full_command = (*base_command, *args)
-
-    info = host_info()
-    user = f"{info.uid}:{info.gid}" if info.system == LINUX else None
-
-    run_config = RunConfig(
-        image=config.image,
-        command=full_command,
-        mounts=tuple(mounts),
-        user=user,
-        name=container_name,
-        memory=profile_config.resources.memory,
-        cpus=profile_config.resources.cpus,
-        pids_limit=profile_config.resources.pids_limit,
-        tty=sys.stdin.isatty() and sys.stdout.isatty(),
-    )
-
-    docker = find_docker() or "docker"
-
-    if dry_run:
-        plan_config = replace(run_config, env_file="<env-file>") if env_values else run_config
-        docker_command = build_run_command(plan_config, docker=docker)
-        _print_plan(agent_name, project_dir, mounts, sorted(env_values), docker_command)
-        return
-
-    try:
-        with env_file(env_values) as path:
-            active_config = replace(run_config, env_file=str(path) if path else None)
-            code = run_container(active_config)
-    except (DockerError, AuthError) as exc:
-        console.print(f"[red]error:[/] {exc}")
-        raise click.exceptions.Exit(code=1) from exc
+        try:
+            with env_file(env_values) as path:
+                active_config = replace(run_config, env_file=str(path) if path else None)
+                code = run_container(active_config)
+        except (DockerError, AuthError) as exc:
+            console.print(f"[red]error:[/] {exc}")
+            raise click.exceptions.Exit(code=1) from exc
+        raise click.exceptions.Exit(code=code)
     finally:
-        for tmp in claude_temp_files:
+        for tmp in temp_files:
             tmp.unlink(missing_ok=True)
-    raise click.exceptions.Exit(code=code)
 
 
 def _load_config() -> Config:
