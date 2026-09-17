@@ -76,7 +76,7 @@ def test_claude_config_mounts_both_exist(tmp_path: Path, monkeypatch: pytest.Mon
     assert len(mounts) == 3
     assert mounts[0].source == claude_dir
     assert mounts[0].target == CONTAINER_CLAUDE_DIR
-    assert mounts[0].mode == "rw"
+    assert mounts[0].mode == "ro"
     assert mounts[1].target == CONTAINER_CLAUDE_SETTINGS
     assert mounts[1].mode == "ro"
     assert mounts[2].source == claude_json

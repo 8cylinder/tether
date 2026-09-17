@@ -36,6 +36,18 @@ def require_docker() -> str:
     return docker
 
 
+def container_running(name: str) -> bool:
+    """Return whether a container with *name* is currently running."""
+    docker = require_docker()
+    result = subprocess.run(
+        [docker, "ps", "--quiet", "--filter", f"name=^/{name}$"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return bool(result.stdout.strip())
+
+
 def image_exists(image: str) -> bool:
     """Return whether *image* is present in the local Docker image store."""
     docker = require_docker()
@@ -182,6 +194,8 @@ def exec_in_container(
         raise DockerError(
             f"docker exec in {name} failed (exit {exc.returncode}): {exc.stderr.strip()}"
         ) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise DockerError(f"docker exec in {name} timed out after 30s") from exc
     except OSError as exc:
         raise DockerError(f"failed to run docker exec: {exc}") from exc
 
@@ -197,7 +211,11 @@ def list_tether_containers() -> list[str]:
     )
     if result.returncode != 0:
         return []
-    return [n.strip() for n in result.stdout.splitlines() if n.strip()]
+    return [
+        n.strip()
+        for n in result.stdout.splitlines()
+        if n.strip() and n.strip().startswith("tether-")
+    ]
 
 
 def remove_image(image: str, *, force: bool = False) -> bool:

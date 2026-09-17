@@ -39,6 +39,7 @@ from tether.docker import (
     RunConfig,
     build_image,
     build_run_command,
+    container_running,
     exec_in_container,
     image_exists,
     list_tether_containers,
@@ -371,7 +372,9 @@ def _launch(
             )
             _print_expiry(creds)
             if named:
-                container_name = _container_name(project or Path.cwd())
+                candidate = _container_name(project or Path.cwd())
+                if not container_running(candidate):
+                    container_name = candidate
 
         if not has_git(project_dir):
             console.print(

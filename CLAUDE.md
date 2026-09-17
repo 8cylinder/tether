@@ -21,7 +21,7 @@ uv run ty check              # type check
 
 ## Architecture
 
-The CLI (`cli.py`) is a Click group with commands: `init`, `build`, `run`, `shell`, `doctor`, `clean`. The `run` and `shell` commands share a `_launch()` function that orchestrates the full pipeline:
+The CLI (`cli.py`) is a Click group with commands: `init`, `build`, `run`, `shell`, `doctor`, `refresh`, `clean`. The `run` and `shell` commands share a `_launch()` function that orchestrates the full pipeline:
 
 1. **config.py** — Pydantic models loaded from `~/.config/tether/config.toml`. Profiles are keyed by platform name (`linux`, `darwin`) and carry agent choice, env vars, extra mounts, and resource limits. Missing config file returns defaults.
 

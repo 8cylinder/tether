@@ -119,7 +119,7 @@ def claude_config_mounts() -> tuple[list[ContainerMount], list[Path]]:
     temp_files: list[Path] = []
     claude_dir = Path.home() / ".claude"
     if claude_dir.is_dir():
-        mounts.append(ContainerMount(source=claude_dir, target=CONTAINER_CLAUDE_DIR, mode="rw"))
+        mounts.append(ContainerMount(source=claude_dir, target=CONTAINER_CLAUDE_DIR, mode="ro"))
         filtered = _filter_claude_settings(claude_dir / "settings.json")
         mounts.append(
             ContainerMount(source=filtered, target=CONTAINER_CLAUDE_SETTINGS, mode="ro")
