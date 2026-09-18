@@ -158,6 +158,27 @@ with the following adjustments:
 These settings only apply inside the container. Your host Claude installation is
 not affected.
 
+## opencode settings
+
+When the agent is `opencode`, tether mounts the host `~/.config/opencode`
+directory read-only (via `OPENCODE_CONFIG_DIR`) so your agents, commands,
+plugins, model, and permissions carry over. A top-level
+`opencode.json`/`opencode.jsonc` is copied to a temp file and exposed through
+`OPENCODE_CONFIG`; copying follows symlinks, so a config symlinked to another
+host path does not dangle inside the container.
+
+Credentials are taken from both sources:
+
+- Host `~/.local/share/opencode/auth.json` is forwarded as
+  `OPENCODE_AUTH_CONTENT`, so providers you logged into with
+  `opencode auth login` work inside the container.
+- Any provider key in your profile (`env.passthrough` or `env.static`) is
+  forwarded too, e.g. `DEEPSEEK_API_KEY`.
+
+Auto-update is disabled (`OPENCODE_DISABLE_AUTOUPDATE=1`) because the container
+image pins the opencode version. Session data (`opencode.db`, snapshots) stays
+inside the container and is discarded on exit; host sessions are not shared.
+
 ## Safety model
 
 `tether run` executes roughly:
@@ -201,15 +222,19 @@ docker run --rm --init --workdir /workspace \
 
 | Platform | Agent | Mechanism |
 | --- | --- | --- |
-| Linux | `opencode` | `DEEPSEEK_API_KEY` forwarded from the host environment. |
+| Linux | `opencode` | Host `~/.local/share/opencode/auth.json` plus any provider key set in the profile. |
 | macOS | `claude` | AWS credentials exported via `aws configure export-credentials` and injected as env vars. |
 
-On Linux, export the key before launching:
+On Linux, either log in on the host once (`opencode auth login`) or set the key
+in your profile so it travels with the config:
 
-```bash
-export DEEPSEEK_API_KEY=sk-...
-tether run
+```toml
+[profiles.linux.env]
+static = { DEEPSEEK_API_KEY = "sk-..." }
 ```
+
+`env.passthrough` also works if you prefer to keep the key out of the config and
+export it in your shell before launching.
 
 ### macOS / Bedrock
 

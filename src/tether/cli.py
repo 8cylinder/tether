@@ -24,6 +24,7 @@ from tether.auth import (
     aws_credentials_ini,
     collect_env,
     env_file,
+    opencode_auth_env,
     resolve_aws_credentials,
     write_aws_credentials_temp,
 )
@@ -53,6 +54,7 @@ from tether.mounts import (
     build_mounts,
     claude_config_mounts,
     has_git,
+    opencode_config_mounts,
     resolve_project,
 )
 from tether.platform import default_profile_name, find_docker, host_info
@@ -354,11 +356,16 @@ def _launch(
         raise click.exceptions.Exit(code=1) from exc
 
     temp_files: list[Path] = []
+    opencode_env: dict[str, str] = {}
     try:
         if agent_name == "claude":
             claude_mounts, claude_temps = claude_config_mounts()
             mounts.extend(claude_mounts)
             temp_files.extend(claude_temps)
+        elif agent_name == "opencode":
+            opencode_mounts, opencode_temps, opencode_env = opencode_config_mounts()
+            mounts.extend(opencode_mounts)
+            temp_files.extend(opencode_temps)
 
         aws_env: dict[str, str] = {}
         container_name: str | None = None
@@ -397,6 +404,10 @@ def _launch(
         env_values.update(aws_env)
         if agent_name == "claude":
             env_values["DISABLE_AUTOUPDATER"] = "1"
+        elif agent_name == "opencode":
+            env_values["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
+            env_values.update(opencode_env)
+            env_values.update(opencode_auth_env())
 
         full_command = (*base_command, *args)
 

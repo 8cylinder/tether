@@ -15,6 +15,8 @@ GIT_DIR = ".git"
 CONTAINER_CLAUDE_DIR = "/tmp/tether-home/.claude"
 CONTAINER_CLAUDE_JSON = "/tmp/tether-home/.claude.json"
 CONTAINER_AWS_CREDENTIALS = "/tmp/tether-home/.aws/credentials"
+CONTAINER_OPENCODE_CONFIG_DIR = "/tmp/tether-home/opencode-config"
+CONTAINER_OPENCODE_CONFIG_BASE = "/tmp/tether-home/opencode-config-file"
 
 
 class MountError(ValueError):
@@ -138,11 +140,54 @@ def claude_config_mounts() -> tuple[list[ContainerMount], list[Path]]:
     if claude_dir.is_dir():
         mounts.append(ContainerMount(source=claude_dir, target=CONTAINER_CLAUDE_DIR, mode="ro"))
         filtered = _filter_claude_settings(claude_dir / "settings.json")
-        mounts.append(
-            ContainerMount(source=filtered, target=CONTAINER_CLAUDE_SETTINGS, mode="ro")
-        )
+        mounts.append(ContainerMount(source=filtered, target=CONTAINER_CLAUDE_SETTINGS, mode="ro"))
         temp_files.append(filtered)
     claude_json = Path.home() / ".claude.json"
     if claude_json.is_file():
         mounts.append(ContainerMount(source=claude_json, target=CONTAINER_CLAUDE_JSON, mode="rw"))
     return mounts, temp_files
+
+
+def _copy_opencode_config(source: Path) -> Path:
+    """Copy *source* to a temp file, following symlinks, for read-only mounting."""
+    handle, name = tempfile.mkstemp(prefix="tether-opencode-config-", suffix=source.suffix)
+    path = Path(name)
+    try:
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(source.read_bytes())
+    except OSError:
+        path.unlink(missing_ok=True)
+        raise
+    return path
+
+
+def opencode_config_mounts() -> tuple[list[ContainerMount], list[Path], dict[str, str]]:
+    """Return read-only mounts for opencode config, temp files, and env vars.
+
+    Mounts ``~/.config/opencode`` at a non-default path (exposed through
+    ``OPENCODE_CONFIG_DIR``) so agents, commands, and plugins carry over. A
+    top-level ``opencode.json``/``opencode.jsonc`` is copied -- following
+    symlinks to host paths that would dangle inside the container -- and mounted
+    separately, exposed through ``OPENCODE_CONFIG``. Mounting at non-default
+    paths avoids Docker resolving a symlinked config to its host target.
+    """
+    mounts: list[ContainerMount] = []
+    temp_files: list[Path] = []
+    env: dict[str, str] = {}
+    config_dir = Path.home() / ".config" / "opencode"
+    if not config_dir.is_dir():
+        return mounts, temp_files, env
+    mounts.append(
+        ContainerMount(source=config_dir, target=CONTAINER_OPENCODE_CONFIG_DIR, mode="ro")
+    )
+    env["OPENCODE_CONFIG_DIR"] = CONTAINER_OPENCODE_CONFIG_DIR
+    for name in ("opencode.json", "opencode.jsonc"):
+        candidate = config_dir / name
+        if candidate.is_file():
+            copied = _copy_opencode_config(candidate)
+            temp_files.append(copied)
+            target = f"{CONTAINER_OPENCODE_CONFIG_BASE}{candidate.suffix}"
+            mounts.append(ContainerMount(source=copied, target=target, mode="ro"))
+            env["OPENCODE_CONFIG"] = target
+            break
+    return mounts, temp_files, env

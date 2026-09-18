@@ -27,9 +27,9 @@ The CLI (`cli.py`) is a Click group with commands: `init`, `build`, `run`, `shel
 
 2. **agents.py** — Static registry of `AgentSpec` definitions mapping agent names (`claude`, `opencode`, `gemini`) to their commands and auto-approve flags. `AgentName` is a `Literal` type used for validation throughout.
 
-3. **mounts.py** — Builds the mount policy: project at `/workspace:rw`, `.git` overlay at `/workspace/.git:ro`, plus user-configured extra mounts. The read-only `.git` overlay is the core safety mechanism.
+3. **mounts.py** — Builds the mount policy: project at `/workspace:rw`, `.git` overlay at `/workspace/.git:ro`, plus user-configured extra mounts. Also mounts per-agent host config read-only when the agent is supported (`~/.claude` for Claude, `~/.config/opencode` for opencode). The read-only `.git` overlay is the core safety mechanism.
 
-4. **auth.py** — Merges static env vars with host passthrough vars, writes them to a mode-0600 temp file used via `--env-file` (secrets never on the command line), and cleans up on exit. Also handles AWS credential export: runs `aws configure export-credentials` on the host, parses STS tokens, and auto-triggers SSO login when needed.
+4. **auth.py** — Merges static env vars with host passthrough vars, writes them to a mode-0600 temp file used via `--env-file` (secrets never on the command line), and cleans up on exit. Also handles AWS credential export: runs `aws configure export-credentials` on the host, parses STS tokens, and auto-triggers SSO login when needed. For opencode it forwards the host `~/.local/share/opencode/auth.json` as `OPENCODE_AUTH_CONTENT`.
 
 5. **docker.py** — Builds and runs the `docker run` command with hardening flags (`--cap-drop ALL`, `--security-opt no-new-privileges`, resource limits). Also handles image build/inspect/remove.
 

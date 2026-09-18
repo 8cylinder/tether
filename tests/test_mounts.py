@@ -10,10 +10,13 @@ from tether.mounts import (
     CONTAINER_CLAUDE_DIR,
     CONTAINER_CLAUDE_JSON,
     CONTAINER_CLAUDE_SETTINGS,
+    CONTAINER_OPENCODE_CONFIG_BASE,
+    CONTAINER_OPENCODE_CONFIG_DIR,
     MountError,
     build_mounts,
     claude_config_mounts,
     has_git,
+    opencode_config_mounts,
     resolve_project,
 )
 
@@ -184,5 +187,66 @@ def test_claude_config_mounts_clean_settings_gets_statusline(
     assert filtered["statusLine"] == _TETHER_STATUS_LINE
     assert filtered["sandbox"] == {"enabled": False}
     assert filtered["permissions"] == {"allow": ["Bash(*)"], "deny": ["Edit", "Write"]}
+    for f in temp_files:
+        f.unlink(missing_ok=True)
+
+
+def test_opencode_config_mounts_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    mounts, temp_files, env = opencode_config_mounts()
+    assert mounts == []
+    assert temp_files == []
+    assert env == {}
+
+
+def test_opencode_config_mounts_dir_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config_dir = tmp_path / ".config" / "opencode"
+    config_dir.mkdir(parents=True)
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    mounts, temp_files, env = opencode_config_mounts()
+    assert len(mounts) == 1
+    assert mounts[0].source == config_dir
+    assert mounts[0].target == CONTAINER_OPENCODE_CONFIG_DIR
+    assert mounts[0].mode == "ro"
+    assert temp_files == []
+    assert env == {"OPENCODE_CONFIG_DIR": CONTAINER_OPENCODE_CONFIG_DIR}
+
+
+def test_opencode_config_mounts_plain_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_dir = tmp_path / ".config" / "opencode"
+    config_dir.mkdir(parents=True)
+    config = config_dir / "opencode.json"
+    config.write_text('{"default_agent": "custom"}', encoding="utf-8")
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    mounts, temp_files, env = opencode_config_mounts()
+    assert len(mounts) == 2
+    assert mounts[0].target == CONTAINER_OPENCODE_CONFIG_DIR
+    assert mounts[1].target == f"{CONTAINER_OPENCODE_CONFIG_BASE}.json"
+    assert mounts[1].mode == "ro"
+    assert len(temp_files) == 1
+    assert temp_files[0].read_text(encoding="utf-8") == '{"default_agent": "custom"}'
+    assert env["OPENCODE_CONFIG"] == f"{CONTAINER_OPENCODE_CONFIG_BASE}.json"
+    for f in temp_files:
+        f.unlink(missing_ok=True)
+
+
+def test_opencode_config_mounts_resolves_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    config_dir = home / ".config" / "opencode"
+    config_dir.mkdir(parents=True)
+    target = tmp_path / "elsewhere" / "opencode.jsonc"
+    target.parent.mkdir(parents=True)
+    target.write_text('{"default_agent": "from-symlink"}', encoding="utf-8")
+    (config_dir / "opencode.jsonc").symlink_to(target)
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
+    mounts, temp_files, env = opencode_config_mounts()
+    assert len(temp_files) == 1
+    assert temp_files[0].read_text(encoding="utf-8") == '{"default_agent": "from-symlink"}'
+    assert mounts[1].target == f"{CONTAINER_OPENCODE_CONFIG_BASE}.jsonc"
+    assert env["OPENCODE_CONFIG"] == f"{CONTAINER_OPENCODE_CONFIG_BASE}.jsonc"
     for f in temp_files:
         f.unlink(missing_ok=True)
