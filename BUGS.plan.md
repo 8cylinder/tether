@@ -1,25 +1,51 @@
 # Design Flaws
 
-## Fix soon
-
-### macOS `--user` silently skipped, changing security posture
-`cli.py:393` only passes `--user` on Linux. On macOS the container runs as `node` (uid 1000), so files created by the agent in `/workspace` are owned by uid 1000 on the host — the invoking user can't delete them without `sudo`. Silent behavior difference between platforms, undocumented.
-
 ## Harden
 
-### Leading-dash image names interpreted as Docker flags
-`docker.py:74` and `docker.py:108` interpolate `config.image` into Docker commands via list argv (no shell injection), but a name like `--help` would be interpreted as a flag. Add a leading-dash check or `--` separator.
+### `_filter_claude_settings` assumes settings.json is a JSON object
+`mounts.py:119-126` only catches `OSError`/`JSONDecodeError`. Valid JSON that is not an object (`[]`, `"x"`, `42`) reaches `data.pop(key, None)` and raises (`TypeError` for a list, `AttributeError` for a string), aborting every `tether run --agent claude`. Guard with `isinstance(data, dict)` before mutating.
 
-### Dockerfile version pins with no override mechanism
-`Dockerfile:3-5` pins agent versions (`CLAUDE_CODE_VERSION`, `OPENCODE_VERSION`, `GEMINI_CLI_VERSION`) baked into source. `build_image` accepts `build_args` but the CLI never passes them. Users must edit source to update. Expose `--build-arg` on the `build` CLI command or read versions from config.
+### `_print_expiry` can raise on naive timestamps
+`cli.py:566` subtracts `datetime.now(UTC)` from `creds.expiration`. `auth.py:175` leaves the parsed value naive when AWS omits the `Z`/offset, so the subtraction raises `TypeError`. Normalize to UTC (or treat a naive value as UTC) before comparing.
+
+### macOS `--user` silently skipped, changing security posture
+`cli.py:445` (and `cli.py:322` for refresh) only passes `--user` on Linux. On macOS the container runs as `node` (uid 1000), so files created by the agent in `/workspace` are owned by uid 1000 on the host — the invoking user can't delete them without `sudo`. Silent behavior difference between platforms, undocumented. The related direction also matters: `write_aws_credentials_temp` (`auth.py:258`) and the filtered Claude settings (`mounts.py:130`) are mode 0600, and on macOS the container process is a different uid, so those mounts may be unreadable depending on Docker Desktop's file sharing.
+
+### Leading-dash image names interpreted as Docker flags
+`config.image` is interpolated into Docker argv as a list, so there is no shell injection, but a name like `--help` is still parsed as a flag. Relevant sites: `docker.py:128` (`docker build --tag`), `docker.py:189` (`docker run` image position), and `docker.py:273` (`docker image rm`). Add a leading-dash check or a `--` separator.
+
+## Documentation drift
+
+### README no longer matches the opencode launch
+`README.md:8`, `:21`, and `:201` claim `opencode --auto` runs with permissive flags. `AGENTS` now launches `opencode` with no flag (`agents.py:26-29`) and `_launch` injects `OPENCODE_CONFIG_CONTENT` with `"edit": "ask"` / `"bash": "allow"` (`cli.py:429-439`). Edits now require approval, contradicting the "permission prompts can be disabled" premise.
+
+### README says macOS Bedrock credentials are env vars
+`README.md:234` and `:263-264` say the STS tokens are injected as environment variables. `aws_credential_env` (`auth.py:219-229`) deliberately *excludes* the credential keys, and `_launch` mounts them as a mode-0600 file at `CONTAINER_AWS_CREDENTIALS` (`cli.py:396-401`). Only `AWS_REGION`/`AWS_DEFAULT_REGION`/`AWS_PAGER` are env vars.
+
+### README claims the image is rebuilt for each new release
+`README.md:88-91` says resolving latest versions means "the image is rebuilt whenever a new release is out". Both `build_image` (`docker.py:124-125`) and the `build` command (`cli.py:167-169`) early-return when the image already exists unless `--force`, so new releases are only picked up with `tether build --force` (or after removing the image).
 
 ## Acceptable as-is
 
 ### env-file permissions rely on `mkstemp` internals
-`auth.py:62` — `mkstemp` creates mode 0600 before umask on Linux/macOS, but this is implicit. The test at `test_auth.py:26` verifies it, which catches regressions.
+`auth.py:67` — `mkstemp` creates mode 0600 before umask on Linux/macOS, but this is implicit. The test at `test_auth.py:26` verifies it, which catches regressions.
 
 ### `run_container` is untestable in isolation
-`docker.py:146` — `subprocess.run` with no stdin/stdout/timeout. Correct for interactive use, but means any test that calls it launches Docker. Command-building is already split out, which is the important part to test.
+`docker.py:194` — `subprocess.run` with no stdin/stdout/timeout. Correct for interactive use, but means any test that calls it launches Docker. Command-building is already split out, which is the important part to test.
 
 ### Dead `None` paths in `build_run_command`
-`docker.py:129-132` — `RunConfig` defaults `memory`/`cpus` to `None`, but in real usage `Resources` always populates them with `"4g"`/`"2"`. The `None` guards in `build_run_command` are dead code that gives a false sense of flexibility. Harmless — leaving the guards is more defensive than removing them.
+`docker.py:185-188` — `RunConfig` defaults `memory`/`cpus` to `None`, but in real usage `Resources` always populates them with `"4g"`/`"2"`. The `None` guards are dead code that gives a false sense of flexibility. Harmless — leaving the guards is more defensive than removing them.
+
+## Resolved
+
+### Extra mounts can shadow the read-only `.git` overlay
+`_check_mount_safety` (`mounts.py:68-78`) now validates the requested target, normalizes it with `posixpath.normpath`, rejects anything at or under `WORKSPACE`, and checks the target against `_DENIED_MOUNT_TARGETS`. Covered by new cases in `test_mounts.py`.
+
+### `_container_name` can emit invalid Docker names
+`_container_name` (`cli.py:579-584`) slugifies the project basename to `[A-Za-z0-9_.-]` (falling back to `project` when empty) before composing the name. Covered by `test_cli.py`.
+
+### Unhandled `DockerError` crashes `run`/`refresh` when Docker is unavailable
+`_launch` suppresses `DockerError` from `container_running` (`cli.py:403-407`) and `refresh` turns `list_tether_containers` failures into a friendly error (`cli.py:297-302`). Covered by `test_cli.py`.
+
+### Dockerfile version pins with no override mechanism
+Resolved by `resolve_agent_build_args` (`docker.py:59-66`), which fetches the latest npm versions and is passed as `--build-arg` by both `tether build` and the automatic build (`cli.py:171-174`, `515-518`). The Dockerfile `ARG`s are now documented fallbacks.

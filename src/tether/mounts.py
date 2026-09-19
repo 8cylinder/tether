@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -61,14 +62,20 @@ _DENIED_MOUNT_SOURCES = frozenset(
 )
 
 _DENIED_MOUNT_TARGETS = frozenset(("/var/run/docker.sock",))
+_WORKSPACE_PREFIX = f"{WORKSPACE}/"
 
 
-def _check_mount_safety(source: Path, mode: str) -> None:
-    """Raise if *source* is a dangerous path to expose to the agent."""
+def _check_mount_safety(source: Path, target: str) -> None:
+    """Raise if *source* or *target* would expose or override a protected path."""
     if source in _DENIED_MOUNT_SOURCES:
         raise MountError(f"refusing to mount dangerous path: {source}")
     if str(source) in _DENIED_MOUNT_TARGETS:
         raise MountError(f"refusing to mount dangerous path: {source}")
+    normalized = posixpath.normpath(target)
+    if normalized in _DENIED_MOUNT_TARGETS:
+        raise MountError(f"refusing to mount dangerous target: {target}")
+    if normalized == WORKSPACE or normalized.startswith(_WORKSPACE_PREFIX):
+        raise MountError(f"refusing to mount over the managed workspace: {target}")
 
 
 def build_mounts(project: Path, *, extra: list[Mount] | None = None) -> list[ContainerMount]:
@@ -96,7 +103,7 @@ def build_mounts(project: Path, *, extra: list[Mount] | None = None) -> list[Con
         source = Path(mount.source).expanduser().resolve()
         if not source.exists():
             raise MountError(f"mount source does not exist: {source}")
-        _check_mount_safety(source, mount.mode)
+        _check_mount_safety(source, mount.target)
         mounts.append(ContainerMount(source=source, target=mount.target, mode=mount.mode))
 
     return mounts

@@ -5,9 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
+from contextlib import suppress
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
@@ -293,7 +295,11 @@ def refresh(container: str | None, profile: str | None) -> None:
         raise click.exceptions.Exit(code=1)
 
     if container is None:
-        containers = list_tether_containers()
+        try:
+            containers = list_tether_containers()
+        except DockerError as exc:
+            console.print(f"[red]error:[/] {exc}")
+            raise click.exceptions.Exit(code=1) from exc
         if not containers:
             console.print("[red]error:[/] no running tether containers found")
             raise click.exceptions.Exit(code=1)
@@ -396,8 +402,9 @@ def _launch(
             _print_expiry(creds)
             if named:
                 candidate = _container_name(project or Path.cwd())
-                if not container_running(candidate):
-                    container_name = candidate
+                with suppress(DockerError):
+                    if not container_running(candidate):
+                        container_name = candidate
 
         if not _ensure_image(config.image, no_build=no_build, dry_run=dry_run):
             raise click.exceptions.Exit(code=1)
@@ -566,9 +573,14 @@ def _print_expiry(creds: AwsCredentials) -> None:
     console.print(f"[dim]AWS credentials expire in {hours}h {minutes}m[/]")
 
 
+_CONTAINER_NAME_UNSAFE = re.compile(r"[^A-Za-z0-9_.-]+")
+
+
 def _container_name(project: Path) -> str:
-    digest = hashlib.sha256(str(project.resolve()).encode()).hexdigest()[:8]
-    return f"tether-{project.resolve().name}-{digest}"
+    resolved = project.resolve()
+    digest = hashlib.sha256(str(resolved).encode()).hexdigest()[:8]
+    slug = _CONTAINER_NAME_UNSAFE.sub("-", resolved.name).strip("-.") or "project"
+    return f"tether-{slug}-{digest}"
 
 
 def _docker_version(docker: str) -> str:

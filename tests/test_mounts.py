@@ -84,6 +84,34 @@ def test_build_mounts_denies_ssh_dir(tmp_path: Path) -> None:
         build_mounts(tmp_path, extra=[extra])
 
 
+@pytest.mark.parametrize("target", ["/workspace", "/workspace/.git", "/workspace/nested"])
+def test_build_mounts_denies_workspace_target(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory, target: str
+) -> None:
+    extra_dir = tmp_path_factory.mktemp("extra")
+    extra = Mount(source=str(extra_dir), target=target, mode="rw")
+    with pytest.raises(MountError, match="managed workspace"):
+        build_mounts(tmp_path, extra=[extra])
+
+
+def test_build_mounts_denies_workspace_target_via_traversal(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    extra_dir = tmp_path_factory.mktemp("extra")
+    extra = Mount(source=str(extra_dir), target="/workspace/../workspace/.git", mode="rw")
+    with pytest.raises(MountError, match="managed workspace"):
+        build_mounts(tmp_path, extra=[extra])
+
+
+def test_build_mounts_denies_docker_socket_target(
+    tmp_path: Path, tmp_path_factory: pytest.TempPathFactory
+) -> None:
+    extra_dir = tmp_path_factory.mktemp("extra")
+    extra = Mount(source=str(extra_dir), target="/var/run/docker.sock", mode="rw")
+    with pytest.raises(MountError, match="dangerous target"):
+        build_mounts(tmp_path, extra=[extra])
+
+
 def test_claude_config_mounts_both_exist(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     claude_dir = tmp_path / ".claude"
     claude_dir.mkdir()
