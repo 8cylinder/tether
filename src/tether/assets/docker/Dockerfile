@@ -31,7 +31,8 @@ RUN mkdir -p -m 755 /etc/apt/keyrings \
         > /etc/apt/sources.list.d/github-cli.list
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends \
+  && apt-get install -y --no-install-recommends \
+        bash-completion \
         gh \
         git \
         jq \
@@ -61,6 +62,8 @@ RUN npm install --global \
 # The node image already provides a non-root user named `node` with uid 1000.
 RUN mkdir -p /workspace /tmp/tether-home \
  && chown node:node /workspace /tmp/tether-home
+
+COPY --chown=node:node bashrc /tmp/tether-home/.bashrc
 
 COPY entrypoint.sh /usr/local/bin/tether-entrypoint
 RUN chmod 0755 /usr/local/bin/tether-entrypoint

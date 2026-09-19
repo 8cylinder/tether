@@ -1,0 +1,115 @@
+# tether container shell configuration -- sourced by interactive bash.
+#
+# The jail's HOME is ephemeral, so this is the only startup file. Keep it
+# self-contained: it runs before every interactive shell.
+
+# Non-interactive shells (bash -c, agents, scripts) get nothing.
+case $- in
+    *i*) ;;
+    *) return ;;
+esac
+
+# Respect a dumb terminal rather than emitting escape sequences.
+[[ "${TERM:-}" == "dumb" ]] && return
+
+# --- History -------------------------------------------------------------
+HISTCONTROL=ignoreboth:erasedups
+HISTSIZE=10000
+HISTFILESIZE=20000
+HISTTIMEFORMAT='%F %T '
+shopt -s histappend
+
+# --- Shell behaviour -----------------------------------------------------
+shopt -s checkwinsize
+shopt -s cdspell
+shopt -s dirspell
+shopt -s globstar
+shopt -s nocaseglob
+shopt -s expand_aliases
+
+# Shorten deep paths in the prompt to (.../parent/leaf).
+PROMPT_DIRTRIM=3
+
+# --- Environment ---------------------------------------------------------
+export LANG="${LANG:-C.UTF-8}"
+export LC_ALL="${LC_ALL:-C.UTF-8}"
+export TERM="${TERM:-xterm-256color}"
+export COLORTERM="${COLORTERM:-truecolor}"
+export CLICOLOR=1
+export PAGER="${PAGER:-less}"
+export LESS="${LESS:--R}"
+export EDITOR="${EDITOR:-vim}"
+export VISUAL="${VISUAL:-vim}"
+
+# The project's .git is mounted read-only; stop git from taking optional locks
+# while the prompt probes repository state.
+export GIT_OPTIONAL_LOCKS=0
+
+# Full extension-aware colors for ls. GNU ls has compiled-in defaults, but
+# dircolors adds archive/media/source-code highlighting.
+if [[ -z "${LS_COLORS:-}" ]] && command -v dircolors >/dev/null 2>&1; then
+    eval "$(dircolors -b)"
+fi
+
+# --- Completion ----------------------------------------------------------
+for completion in \
+    /usr/share/bash-completion/bash_completion \
+    /etc/bash_completion; do
+    if [[ -r "$completion" ]]; then
+        . "$completion"
+        break
+    fi
+done
+
+# --- Readline ------------------------------------------------------------
+# Case-insensitive completion and arrow-key history search.
+bind 'set completion-ignore-case on' 2>/dev/null
+bind 'set show-all-if-ambiguous on' 2>/dev/null
+bind '"\e[A": history-search-backward' 2>/dev/null
+bind '"\e[B": history-search-forward' 2>/dev/null
+
+# --- Aliases -------------------------------------------------------------
+alias ll='ls --format=long'
+alias ls='LC_ALL=C ls --almost-all --classify --human-readable --color=auto --group-directories-first --time-style="+%Y-%m-%d %I:%M%P"'
+
+# --- Prompt --------------------------------------------------------------
+# Two lines: context on the first, input on the second. `\u` is avoided on
+# purpose -- the jail may run as a host uid with no passwd entry, which bash
+# renders as "I have no name!".
+
+__tether_git_branch() {
+    command git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+    local branch
+    branch=$(command git symbolic-ref --short HEAD 2>/dev/null) ||
+        branch=$(command git rev-parse --short HEAD 2>/dev/null) ||
+        return 0
+    local dirty=''
+    if ! command git diff --quiet --ignore-submodules 2>/dev/null ||
+        ! command git diff --cached --quiet --ignore-submodules 2>/dev/null; then
+        dirty='*'
+    fi
+    printf ' (%s%s)' "$branch" "$dirty"
+}
+
+__tether_prompt_command() {
+    local exit_code=$?
+    local reset='\[\033[0m\]'
+    local green='\[\033[01;32m\]'
+    local blue='\[\033[01;34m\]'
+    local cyan='\[\033[01;36m\]'
+    local magenta='\[\033[01;35m\]'
+    local yellow='\[\033[01;33m\]'
+    local red='\[\033[01;31m\]'
+
+    local marker
+    if (( exit_code == 0 )); then
+        marker="${green}➜${reset}"
+    else
+        marker="${red}➜ ${yellow}${exit_code}${reset}"
+    fi
+
+    PS1="${blue}tether${reset} ${cyan}\w${reset}"
+    PS1+="${magenta}$(__tether_git_branch)${reset}\n"
+    PS1+="${marker} "
+}
+PROMPT_COMMAND='__tether_prompt_command'
