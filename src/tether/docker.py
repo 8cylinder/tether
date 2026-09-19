@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
+import json
 import subprocess
+import urllib.request
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from tether.mounts import ContainerMount
 from tether.platform import find_docker
+
+NPM_REGISTRY = "https://registry.npmjs.org"
+
+# Dockerfile build args mapped to the npm packages they install. `tether build`
+# resolves these to the latest published versions so the image does not ship
+# with stale agent CLIs.
+AGENT_PACKAGES: dict[str, str] = {
+    "CLAUDE_CODE_VERSION": "@anthropic-ai/claude-code",
+    "OPENCODE_VERSION": "opencode-ai",
+    "GEMINI_CLI_VERSION": "@google/gemini-cli",
+}
 
 
 class DockerError(RuntimeError):
@@ -22,6 +36,34 @@ def docker_assets_dir() -> Path:
 def dockerfile_path() -> Path:
     """Return the path to the bundled Dockerfile."""
     return docker_assets_dir() / "Dockerfile"
+
+
+def _fetch_latest_version(package: str, *, timeout: float = 10.0) -> str:
+    """Return the latest published version of *package* from the npm registry.
+
+    Raises:
+        DockerError: when the registry cannot be reached or returns no version.
+    """
+    url = f"{NPM_REGISTRY}/{package.replace('/', '%2f')}/latest"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except (OSError, ValueError) as exc:
+        raise DockerError(f"could not resolve latest version of {package}: {exc}") from exc
+    version = payload.get("version") if isinstance(payload, dict) else None
+    if not isinstance(version, str) or not version:
+        raise DockerError(f"npm registry returned no version for {package}")
+    return version
+
+
+def resolve_agent_build_args(*, fetcher: Callable[[str], str] | None = None) -> dict[str, str]:
+    """Return build args pinning each agent to its latest published version.
+
+    Raises:
+        DockerError: when a package version cannot be resolved.
+    """
+    fetch = fetcher or _fetch_latest_version
+    return {key: fetch(package) for key, package in AGENT_PACKAGES.items()}
 
 
 def require_docker() -> str:

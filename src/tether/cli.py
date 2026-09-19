@@ -45,6 +45,7 @@ from tether.docker import (
     image_exists,
     list_tether_containers,
     remove_image,
+    resolve_agent_build_args,
     run_container,
 )
 from tether.mounts import (
@@ -151,13 +152,23 @@ def doctor() -> None:
 
 @app.command()
 @click.option("--force", is_flag=True, help="Rebuild even if the image already exists.")
-def build(force: bool) -> None:
+@click.option(
+    "--pinned",
+    is_flag=True,
+    help="Use the versions pinned in the Dockerfile instead of the latest releases.",
+)
+def build(force: bool, pinned: bool) -> None:
     """Build the container image used by the jail."""
     config = _load_config()
 
+    if not force and _image_present(config.image):
+        console.print(f"{config.image} already exists (use --force to rebuild).")
+        return
+
+    build_args = _agent_build_args(pinned=pinned)
     console.print(f"Building [bold]{config.image}[/] ...")
     try:
-        result = build_image(config.image, force=force)
+        result = build_image(config.image, force=force, build_args=build_args)
     except DockerError as exc:
         console.print(f"[red]error:[/] {exc}")
         raise click.exceptions.Exit(code=1) from exc
@@ -455,15 +466,37 @@ def _load_config() -> Config:
         raise click.exceptions.Exit(code=1) from exc
 
 
+def _agent_build_args(*, pinned: bool = False) -> dict[str, str]:
+    """Resolve latest agent CLI versions for the image build.
+
+    Falls back to the Dockerfile pins (no build args) when resolution fails.
+    """
+    if pinned:
+        return {}
+    try:
+        build_args = resolve_agent_build_args()
+    except DockerError as exc:
+        console.print(f"[yellow]warning:[/] {exc}; using pinned versions from the Dockerfile")
+        return {}
+    if build_args:
+        summary = ", ".join(
+            f"{name.removesuffix('_VERSION').lower()}={version}"
+            for name, version in sorted(build_args.items())
+        )
+        console.print(f"Resolved latest agent versions: {summary}")
+    return build_args
+
+
 def _ensure_image(image: str, *, no_build: bool, dry_run: bool) -> bool:
     if _image_present(image):
         return True
     if dry_run or no_build:
         console.print(f"[yellow]image not built:[/] {image}. Run 'tether build'.")
         return not no_build
+    build_args = _agent_build_args()
     console.print(f"Building [bold]{image}[/] ...")
     try:
-        build_image(image)
+        build_image(image, build_args=build_args)
     except DockerError as exc:
         console.print(f"[red]error:[/] {exc}")
         return False

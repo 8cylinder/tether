@@ -67,7 +67,7 @@ tether run --dry-run
 | Command | Description |
 | --- | --- |
 | `tether init [--force] [--path P]` | Write the default config file (refuses to overwrite without `--force`). |
-| `tether build [--force]` | Build the container image; idempotent unless `--force`. |
+| `tether build [--force] [--pinned]` | Build the container image; idempotent unless `--force`. |
 | `tether run [options] [-- ARGS...]` | Launch an agent inside the jail. |
 | `tether shell [options] [-- ARGS...]` | Open a shell inside the jail (useful for debugging). |
 | `tether doctor` | Report host, Docker, config, image, and credential readiness. |
@@ -84,6 +84,13 @@ tether run --dry-run
 
 Trailing arguments are passed through to the agent, e.g.
 `tether run --agent claude -- --resume`.
+
+By default `tether build` (and the automatic build performed by `run`/`shell`
+when the image is missing) resolves the latest published version of each agent
+CLI from the npm registry and passes them to Docker as `--build-arg`, so the
+image is rebuilt whenever a new release is out. Use `--pinned` to fall back to
+the versions pinned in the Dockerfile, and note that resolution failure emits a
+warning and also falls back to the pins.
 
 ## Configuration
 
@@ -176,8 +183,9 @@ Credentials are taken from both sources:
   forwarded too, e.g. `DEEPSEEK_API_KEY`.
 
 Auto-update is disabled (`OPENCODE_DISABLE_AUTOUPDATE=1`) because the container
-image pins the opencode version. Session data (`opencode.db`, snapshots) stays
-inside the container and is discarded on exit; host sessions are not shared.
+image pins the opencode version at build time. Rebuild the image to pick up a
+newer release. Session data (`opencode.db`, snapshots) stays inside the
+container and is discarded on exit; host sessions are not shared.
 
 ## Safety model
 

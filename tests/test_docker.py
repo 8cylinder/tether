@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tether.docker import RunConfig, build_run_command
+import pytest
+
+from tether.docker import (
+    AGENT_PACKAGES,
+    DockerError,
+    RunConfig,
+    _fetch_latest_version,
+    build_run_command,
+    resolve_agent_build_args,
+)
 from tether.mounts import ContainerMount
 
 
@@ -86,3 +95,69 @@ def test_build_run_command_without_name(tmp_path: Path) -> None:
     config = RunConfig(image="img", command=("bash",), mounts=(_mount(tmp_path),))
     command = build_run_command(config, docker="docker")
     assert "--name" not in command
+
+
+def test_resolve_agent_build_args_uses_fetcher() -> None:
+    versions = {package: f"1.0.{index}" for index, package in enumerate(AGENT_PACKAGES.values())}
+    calls: list[str] = []
+
+    def fake_fetch(package: str) -> str:
+        calls.append(package)
+        return versions[package]
+
+    build_args = resolve_agent_build_args(fetcher=fake_fetch)
+
+    assert build_args == {key: versions[package] for key, package in AGENT_PACKAGES.items()}
+    assert calls == list(AGENT_PACKAGES.values())
+
+
+def test_resolve_agent_build_args_propagates_error() -> None:
+    def fake_fetch(_package: str) -> str:
+        raise DockerError("registry unavailable")
+
+    with pytest.raises(DockerError):
+        resolve_agent_build_args(fetcher=fake_fetch)
+
+
+def test_fetch_latest_version_reads_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, str] = {}
+
+    class _Response:
+        def __enter__(self) -> _Response:
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+        def read(self) -> bytes:
+            return b'{"version": "1.2.3"}'
+
+    def fake_urlopen(url: str, timeout: float = 0) -> _Response:
+        captured["url"] = url
+        captured["timeout"] = str(timeout)
+        return _Response()
+
+    monkeypatch.setattr("tether.docker.urllib.request.urlopen", fake_urlopen)
+
+    assert _fetch_latest_version("@anthropic-ai/claude-code") == "1.2.3"
+    assert captured["url"] == "https://registry.npmjs.org/@anthropic-ai%2fclaude-code/latest"
+
+
+def test_fetch_latest_version_rejects_missing_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _Response:
+        def __enter__(self) -> _Response:
+            return self
+
+        def __exit__(self, *_args: object) -> bool:
+            return False
+
+        def read(self) -> bytes:
+            return b"{}"
+
+    monkeypatch.setattr(
+        "tether.docker.urllib.request.urlopen",
+        lambda url, timeout=0: _Response(),
+    )
+
+    with pytest.raises(DockerError):
+        _fetch_latest_version("opencode-ai")

@@ -2,6 +2,8 @@
 
 FROM node:22-bookworm-slim
 
+# Fallback pins. `tether build` resolves the latest published versions and
+# passes them via --build-arg, so these only apply when resolution fails.
 ARG CLAUDE_CODE_VERSION=2.1.270
 ARG OPENCODE_VERSION=1.18.30
 ARG GEMINI_CLI_VERSION=0.59.0
@@ -35,6 +37,7 @@ RUN apt-get update \
         jq \
         less \
         ncdu \
+        htop \
         procps \
         python3 \
         python3-pip \
