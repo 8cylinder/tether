@@ -25,7 +25,7 @@ AGENTS: dict[str, AgentSpec] = {
     ),
     "opencode": AgentSpec(
         name="opencode",
-        command=("opencode", "--auto"),
+        command=("opencode",),
         description="opencode",
     ),
     "gemini": AgentSpec(

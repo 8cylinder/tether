@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shlex
 import subprocess
@@ -417,6 +418,17 @@ def _launch(
             env_values["DISABLE_AUTOUPDATER"] = "1"
         elif agent_name == "opencode":
             env_values["OPENCODE_DISABLE_AUTOUPDATE"] = "1"
+            permission = {"edit": "ask", "bash": "allow"}
+            env_values["OPENCODE_CONFIG_CONTENT"] = json.dumps(
+                {
+                    "$schema": "https://opencode.ai/config.json",
+                    "permission": permission,
+                    "agent": {
+                        "normal": {"permission": permission},
+                        "build": {"permission": permission},
+                    },
+                }
+            )
             env_values.update(opencode_env)
             env_values.update(opencode_auth_env())
 
