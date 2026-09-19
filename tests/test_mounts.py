@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import stat
 from pathlib import Path
 
 import pytest
@@ -131,12 +132,12 @@ def test_claude_config_mounts_both_exist(tmp_path: Path, monkeypatch: pytest.Mon
     assert len(temp_files) == 1
     import json
 
-    filtered = json.loads(temp_files[0].read_text(encoding="utf-8"))
+    filtered = json.loads(temp_files[0].path.read_text(encoding="utf-8"))
     assert filtered["statusLine"] == _TETHER_STATUS_LINE
     assert filtered["sandbox"] == {"enabled": False}
     assert filtered["permissions"] == {"allow": ["Bash(*)"], "deny": ["Edit", "Write"]}
     for f in temp_files:
-        f.unlink(missing_ok=True)
+        f.cleanup()
 
 
 def test_claude_config_mounts_dir_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -149,12 +150,12 @@ def test_claude_config_mounts_dir_only(tmp_path: Path, monkeypatch: pytest.Monke
     assert len(temp_files) == 1
     import json
 
-    filtered = json.loads(temp_files[0].read_text(encoding="utf-8"))
+    filtered = json.loads(temp_files[0].path.read_text(encoding="utf-8"))
     assert filtered["statusLine"] == _TETHER_STATUS_LINE
     assert filtered["sandbox"] == {"enabled": False}
     assert filtered["permissions"] == {"allow": ["Bash(*)"], "deny": ["Edit", "Write"]}
     for f in temp_files:
-        f.unlink(missing_ok=True)
+        f.cleanup()
 
 
 def test_claude_config_mounts_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -184,7 +185,7 @@ def test_claude_config_mounts_filters_settings(
     assert len(temp_files) == 1
     import json
 
-    filtered = json.loads(temp_files[0].read_text(encoding="utf-8"))
+    filtered = json.loads(temp_files[0].path.read_text(encoding="utf-8"))
     assert "theme" in filtered
     assert "env" not in filtered
     assert "awsAuthRefresh" not in filtered
@@ -192,7 +193,7 @@ def test_claude_config_mounts_filters_settings(
     assert filtered["sandbox"] == {"enabled": False}
     assert filtered["permissions"] == {"allow": ["Bash(*)"], "deny": ["Edit", "Write"]}
     for f in temp_files:
-        f.unlink(missing_ok=True)
+        f.cleanup()
 
 
 def test_claude_config_mounts_clean_settings_gets_statusline(
@@ -209,14 +210,31 @@ def test_claude_config_mounts_clean_settings_gets_statusline(
     assert len(temp_files) == 1
     import json
 
-    filtered = json.loads(temp_files[0].read_text(encoding="utf-8"))
+    filtered = json.loads(temp_files[0].path.read_text(encoding="utf-8"))
     assert filtered["theme"] == "dark"
     assert filtered["model"] == "opus"
     assert filtered["statusLine"] == _TETHER_STATUS_LINE
     assert filtered["sandbox"] == {"enabled": False}
     assert filtered["permissions"] == {"allow": ["Bash(*)"], "deny": ["Edit", "Write"]}
     for f in temp_files:
-        f.unlink(missing_ok=True)
+        f.cleanup()
+
+
+def test_claude_config_mounts_stages_container_readable_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    claude_dir = tmp_path / ".claude"
+    claude_dir.mkdir()
+    (claude_dir / "settings.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    _, temp_files = claude_config_mounts()
+    try:
+        staged = temp_files[0]
+        assert stat.S_IMODE(staged.path.stat().st_mode) == 0o644
+        assert stat.S_IMODE(staged.path.parent.stat().st_mode) == 0o700
+    finally:
+        for f in temp_files:
+            f.cleanup()
 
 
 def test_opencode_config_mounts_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -254,10 +272,10 @@ def test_opencode_config_mounts_plain_config(
     assert mounts[1].target == f"{CONTAINER_OPENCODE_CONFIG_BASE}.json"
     assert mounts[1].mode == "ro"
     assert len(temp_files) == 1
-    assert temp_files[0].read_text(encoding="utf-8") == '{"default_agent": "custom"}'
+    assert temp_files[0].path.read_text(encoding="utf-8") == '{"default_agent": "custom"}'
     assert env["OPENCODE_CONFIG"] == f"{CONTAINER_OPENCODE_CONFIG_BASE}.json"
     for f in temp_files:
-        f.unlink(missing_ok=True)
+        f.cleanup()
 
 
 def test_opencode_config_mounts_resolves_symlink(
@@ -273,8 +291,25 @@ def test_opencode_config_mounts_resolves_symlink(
     monkeypatch.setattr(Path, "home", staticmethod(lambda: home))
     mounts, temp_files, env = opencode_config_mounts()
     assert len(temp_files) == 1
-    assert temp_files[0].read_text(encoding="utf-8") == '{"default_agent": "from-symlink"}'
+    assert temp_files[0].path.read_text(encoding="utf-8") == '{"default_agent": "from-symlink"}'
     assert mounts[1].target == f"{CONTAINER_OPENCODE_CONFIG_BASE}.jsonc"
     assert env["OPENCODE_CONFIG"] == f"{CONTAINER_OPENCODE_CONFIG_BASE}.jsonc"
     for f in temp_files:
-        f.unlink(missing_ok=True)
+        f.cleanup()
+
+
+def test_opencode_config_mounts_stages_container_readable_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_dir = tmp_path / ".config" / "opencode"
+    config_dir.mkdir(parents=True)
+    (config_dir / "opencode.json").write_text('{"model": "x"}', encoding="utf-8")
+    monkeypatch.setattr(Path, "home", staticmethod(lambda: tmp_path))
+    _, temp_files, _ = opencode_config_mounts()
+    try:
+        staged = temp_files[0]
+        assert stat.S_IMODE(staged.path.stat().st_mode) == 0o644
+        assert stat.S_IMODE(staged.path.parent.stat().st_mode) == 0o700
+    finally:
+        for f in temp_files:
+            f.cleanup()

@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 import posixpath
-import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
 from tether.config import Mount
+from tether.staging import READ_ONLY_MODE, StagedFile, stage
 
 WORKSPACE = "/workspace"
 GIT_DIR = ".git"
@@ -116,8 +115,8 @@ _TETHER_STATUS_LINE = {"type": "command", "command": "echo '⚛️ tether ⚛️
 CONTAINER_CLAUDE_SETTINGS = f"{CONTAINER_CLAUDE_DIR}/settings.json"
 
 
-def _filter_claude_settings(source: Path) -> Path:
-    """Read *source*, strip conflicting keys, inject tether statusLine, write a temp copy."""
+def _filter_claude_settings(source: Path) -> StagedFile:
+    """Read *source*, strip conflicting keys, inject tether statusLine, stage a copy."""
     try:
         data = json.loads(source.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
@@ -127,49 +126,39 @@ def _filter_claude_settings(source: Path) -> Path:
     data["statusLine"] = _TETHER_STATUS_LINE
     data["sandbox"] = {"enabled": False}
     data["permissions"] = {"allow": ["Bash(*)"], "deny": ["Edit", "Write"]}
-    handle, name = tempfile.mkstemp(prefix="tether-claude-settings-", suffix=".json")
-    with os.fdopen(handle, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
-    return Path(name)
+    return stage(json.dumps(data, indent=2) + "\n", mode=READ_ONLY_MODE, suffix=".json")
 
 
-def claude_config_mounts() -> tuple[list[ContainerMount], list[Path]]:
-    """Return read-write mounts for Claude Code config and any temp files to clean up.
+def claude_config_mounts() -> tuple[list[ContainerMount], list[StagedFile]]:
+    """Return mounts for Claude Code config and any staged files to clean up.
 
     Mounts ``~/.claude/`` and ``~/.claude.json``.  If ``~/.claude/settings.json``
     contains keys that conflict with container auth (``env``, ``awsAuthRefresh``),
     a filtered copy is mounted on top of the original.
     """
     mounts: list[ContainerMount] = []
-    temp_files: list[Path] = []
+    staged_files: list[StagedFile] = []
     claude_dir = Path.home() / ".claude"
     if claude_dir.is_dir():
         mounts.append(ContainerMount(source=claude_dir, target=CONTAINER_CLAUDE_DIR, mode="ro"))
         filtered = _filter_claude_settings(claude_dir / "settings.json")
-        mounts.append(ContainerMount(source=filtered, target=CONTAINER_CLAUDE_SETTINGS, mode="ro"))
-        temp_files.append(filtered)
+        mounts.append(
+            ContainerMount(source=filtered.path, target=CONTAINER_CLAUDE_SETTINGS, mode="ro")
+        )
+        staged_files.append(filtered)
     claude_json = Path.home() / ".claude.json"
     if claude_json.is_file():
         mounts.append(ContainerMount(source=claude_json, target=CONTAINER_CLAUDE_JSON, mode="rw"))
-    return mounts, temp_files
+    return mounts, staged_files
 
 
-def _copy_opencode_config(source: Path) -> Path:
-    """Copy *source* to a temp file, following symlinks, for read-only mounting."""
-    handle, name = tempfile.mkstemp(prefix="tether-opencode-config-", suffix=source.suffix)
-    path = Path(name)
-    try:
-        with os.fdopen(handle, "wb") as stream:
-            stream.write(source.read_bytes())
-    except OSError:
-        path.unlink(missing_ok=True)
-        raise
-    return path
+def _copy_opencode_config(source: Path) -> StagedFile:
+    """Stage *source*, following symlinks, for read-only mounting."""
+    return stage(source.read_bytes(), mode=READ_ONLY_MODE, suffix=source.suffix)
 
 
-def opencode_config_mounts() -> tuple[list[ContainerMount], list[Path], dict[str, str]]:
-    """Return read-only mounts for opencode config, temp files, and env vars.
+def opencode_config_mounts() -> tuple[list[ContainerMount], list[StagedFile], dict[str, str]]:
+    """Return read-only mounts for opencode config, staged files, and env vars.
 
     Mounts ``~/.config/opencode`` at a non-default path (exposed through
     ``OPENCODE_CONFIG_DIR``) so agents, commands, and plugins carry over. A
@@ -179,11 +168,11 @@ def opencode_config_mounts() -> tuple[list[ContainerMount], list[Path], dict[str
     paths avoids Docker resolving a symlinked config to its host target.
     """
     mounts: list[ContainerMount] = []
-    temp_files: list[Path] = []
+    staged_files: list[StagedFile] = []
     env: dict[str, str] = {}
     config_dir = Path.home() / ".config" / "opencode"
     if not config_dir.is_dir():
-        return mounts, temp_files, env
+        return mounts, staged_files, env
     mounts.append(
         ContainerMount(source=config_dir, target=CONTAINER_OPENCODE_CONFIG_DIR, mode="ro")
     )
@@ -192,9 +181,9 @@ def opencode_config_mounts() -> tuple[list[ContainerMount], list[Path], dict[str
         candidate = config_dir / name
         if candidate.is_file():
             copied = _copy_opencode_config(candidate)
-            temp_files.append(copied)
+            staged_files.append(copied)
             target = f"{CONTAINER_OPENCODE_CONFIG_BASE}{candidate.suffix}"
-            mounts.append(ContainerMount(source=copied, target=target, mode="ro"))
+            mounts.append(ContainerMount(source=copied.path, target=target, mode="ro"))
             env["OPENCODE_CONFIG"] = target
             break
-    return mounts, temp_files, env
+    return mounts, staged_files, env

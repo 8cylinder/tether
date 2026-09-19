@@ -29,7 +29,7 @@ from tether.auth import (
     env_file,
     opencode_auth_env,
     resolve_aws_credentials,
-    write_aws_credentials_temp,
+    stage_aws_credentials,
 )
 from tether.config import (
     Config,
@@ -62,6 +62,7 @@ from tether.mounts import (
     resolve_project,
 )
 from tether.platform import default_profile_name, find_docker, host_info
+from tether.staging import StagedFile
 
 console = Console()
 
@@ -373,17 +374,17 @@ def _launch(
         console.print(f"[red]mount error:[/] {exc}")
         raise click.exceptions.Exit(code=1) from exc
 
-    temp_files: list[Path] = []
+    staged_files: list[StagedFile] = []
     opencode_env: dict[str, str] = {}
     try:
         if agent_name == "claude":
             claude_mounts, claude_temps = claude_config_mounts()
             mounts.extend(claude_mounts)
-            temp_files.extend(claude_temps)
+            staged_files.extend(claude_temps)
         elif agent_name == "opencode":
             opencode_mounts, opencode_temps, opencode_env = opencode_config_mounts()
             mounts.extend(opencode_mounts)
-            temp_files.extend(opencode_temps)
+            staged_files.extend(opencode_temps)
 
         aws_env: dict[str, str] = {}
         container_name: str | None = None
@@ -394,10 +395,10 @@ def _launch(
                 console.print(f"[red]auth error:[/] {exc}")
                 raise click.exceptions.Exit(code=1) from exc
             aws_env = aws_credential_env(creds)
-            creds_file = write_aws_credentials_temp(creds)
-            temp_files.append(creds_file)
+            creds_file = stage_aws_credentials(creds)
+            staged_files.append(creds_file)
             mounts.append(
-                ContainerMount(source=creds_file, target=CONTAINER_AWS_CREDENTIALS, mode="rw")
+                ContainerMount(source=creds_file.path, target=CONTAINER_AWS_CREDENTIALS, mode="rw")
             )
             _print_expiry(creds)
             if named:
@@ -473,8 +474,8 @@ def _launch(
             raise click.exceptions.Exit(code=1) from exc
         raise click.exceptions.Exit(code=code)
     finally:
-        for tmp in temp_files:
-            tmp.unlink(missing_ok=True)
+        for staged in staged_files:
+            staged.cleanup()
 
 
 def _load_config() -> Config:

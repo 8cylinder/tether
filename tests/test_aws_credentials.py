@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import stat
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -16,6 +17,7 @@ from tether.auth import (
     find_aws_cli,
     resolve_aws_credentials,
     run_sso_login,
+    stage_aws_credentials,
     write_aws_credentials_file,
 )
 from tether.config import AwsCredentialExport
@@ -263,3 +265,22 @@ def test_write_aws_credentials_file(tmp_path: Path) -> None:
     assert "aws_secret_access_key = secret" in content
     assert "aws_session_token = tok" in content
     assert "region = us-west-2" in content
+
+
+# -- stage_aws_credentials ---------------------------------------------------
+
+
+def test_stage_aws_credentials_readable_and_writable_by_any_uid() -> None:
+    creds = AwsCredentials(
+        access_key_id="AKIA",
+        secret_access_key="secret",
+        session_token="tok",
+        region="us-west-2",
+    )
+    staged = stage_aws_credentials(creds)
+    try:
+        assert stat.S_IMODE(staged.path.stat().st_mode) == 0o666
+        assert stat.S_IMODE(staged.path.parent.stat().st_mode) == 0o700
+        assert "aws_access_key_id = AKIA" in staged.path.read_text(encoding="utf-8")
+    finally:
+        staged.cleanup()

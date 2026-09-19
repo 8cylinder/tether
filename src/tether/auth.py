@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 from tether.config import AwsCredentialExport, EnvConfig
+from tether.staging import READ_WRITE_MODE, StagedFile, stage
 
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -255,17 +256,14 @@ def write_aws_credentials_file(creds: AwsCredentials, path: Path) -> None:
         tmp.replace(path)
 
 
-def write_aws_credentials_temp(creds: AwsCredentials) -> Path:
-    """Write credentials to a temp file and return the path (caller cleans up)."""
-    content = aws_credentials_ini(creds)
-    handle, name = tempfile.mkstemp(prefix="tether-aws-creds-", suffix=".ini")
-    try:
-        with os.fdopen(handle, "w", encoding="utf-8") as stream:
-            stream.write(content)
-    except Exception:
-        Path(name).unlink(missing_ok=True)
-        raise
-    return Path(name)
+def stage_aws_credentials(creds: AwsCredentials) -> StagedFile:
+    """Stage the credentials file for a read-write bind mount (caller cleans up).
+
+    The file is world-readable and world-writable *inside* its private staging
+    directory so the container process can read it (initial auth) and overwrite
+    it (`tether refresh`) whichever uid it runs as.
+    """
+    return stage(aws_credentials_ini(creds), mode=READ_WRITE_MODE, suffix=".ini")
 
 
 # ---------------------------------------------------------------------------

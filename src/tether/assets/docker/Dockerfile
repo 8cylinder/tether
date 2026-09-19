@@ -60,8 +60,12 @@ RUN npm install --global \
  && npm cache clean --force
 
 # The node image already provides a non-root user named `node` with uid 1000.
+# /tmp/tether-home is the container HOME. It is world-writable (with the sticky
+# bit) so the agent can create `$HOME/.config`, `$HOME/.cache`, etc. even when
+# tether launches with `--user <host-uid>:<host-gid>` on Linux.
 RUN mkdir -p /workspace /tmp/tether-home \
- && chown node:node /workspace /tmp/tether-home
+ && chown node:node /workspace /tmp/tether-home \
+ && chmod 1777 /tmp/tether-home
 
 COPY --chown=node:node bashrc /tmp/tether-home/.bashrc
 
