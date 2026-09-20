@@ -13,11 +13,15 @@ from tether.mounts import (
     CONTAINER_CLAUDE_SETTINGS,
     CONTAINER_OPENCODE_CONFIG_BASE,
     CONTAINER_OPENCODE_CONFIG_DIR,
+    CONTAINER_OPENCODE_DATA_DIR,
+    CONTAINER_OPENCODE_STATE_DIR,
     MountError,
     build_mounts,
     claude_config_mounts,
     has_git,
     opencode_config_mounts,
+    opencode_state_mounts,
+    project_state_dir,
     resolve_project,
 )
 
@@ -313,3 +317,45 @@ def test_opencode_config_mounts_stages_container_readable_config(
     finally:
         for f in temp_files:
             f.cleanup()
+
+
+def test_opencode_state_mounts_layout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "proj"
+    project.mkdir()
+    mounts = opencode_state_mounts(project)
+    assert [mount.target for mount in mounts] == [
+        CONTAINER_OPENCODE_DATA_DIR,
+        CONTAINER_OPENCODE_STATE_DIR,
+    ]
+    assert all(mount.mode == "rw" for mount in mounts)
+    for mount in mounts:
+        assert mount.source.is_dir()
+        assert stat.S_IMODE(mount.source.stat().st_mode) == 0o700
+
+
+def test_opencode_state_mounts_isolated_per_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    first = tmp_path / "a"
+    second = tmp_path / "b"
+    first.mkdir()
+    second.mkdir()
+    assert opencode_state_mounts(first)[0].source != opencode_state_mounts(second)[0].source
+
+
+def test_opencode_state_mounts_stable_for_same_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    project = tmp_path / "proj"
+    project.mkdir()
+    assert opencode_state_mounts(project) == opencode_state_mounts(project)
+
+
+def test_project_state_dir_is_private(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    root = project_state_dir(tmp_path)
+    assert root.is_dir()
+    assert stat.S_IMODE(root.stat().st_mode) == 0o700

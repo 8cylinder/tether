@@ -78,9 +78,41 @@ def test_launch_survives_container_lookup_failure(
     monkeypatch.setattr(cli, "resolve_aws_credentials", lambda _config: _creds())
     monkeypatch.setattr(cli, "container_running", boom)
     monkeypatch.setattr(cli, "opencode_config_mounts", lambda: ([], [], {}))
+    monkeypatch.setattr(cli, "opencode_state_mounts", lambda _project: [])
     monkeypatch.setattr(cli, "opencode_auth_env", dict)
 
     result = CliRunner().invoke(cli.app, ["run", "--dry-run", "-C", str(tmp_path)])
 
     assert result.exit_code == 0
     assert "docker command:" in result.output
+
+
+def test_run_continue_passes_flag_to_opencode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli, "_load_config", Config)
+    monkeypatch.setattr(cli, "opencode_config_mounts", lambda: ([], [], {}))
+    monkeypatch.setattr(cli, "opencode_state_mounts", lambda _project: [])
+    monkeypatch.setattr(cli, "opencode_auth_env", dict)
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["run", "--agent", "opencode", "--continue", "--dry-run", "-C", str(tmp_path)],
+    )
+
+    assert result.exit_code == 0
+    assert "--continue" in result.output
+
+
+def test_run_continue_rejects_unsupported_agent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli, "_load_config", Config)
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["run", "--agent", "gemini", "--continue", "--dry-run", "-C", str(tmp_path)],
+    )
+
+    assert result.exit_code == 1
+    assert "does not support --continue" in result.output

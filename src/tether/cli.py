@@ -7,6 +7,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 from contextlib import suppress
@@ -59,9 +60,10 @@ from tether.mounts import (
     claude_config_mounts,
     has_git,
     opencode_config_mounts,
+    opencode_state_mounts,
     resolve_project,
 )
-from tether.platform import default_profile_name, find_docker, host_info
+from tether.platform import default_profile_name, find_docker, host_info, state_dir
 from tether.staging import StagedFile
 
 console = Console()
@@ -200,6 +202,12 @@ def build(force: bool, pinned: bool) -> None:
 @click.option("--profile", default=None, help="Config profile to use (default: platform name).")
 @click.option("--dry-run", is_flag=True, help="Print the docker command without running it.")
 @click.option("--no-build", is_flag=True, help="Fail instead of building a missing image.")
+@click.option(
+    "--continue",
+    "continue_session",
+    is_flag=True,
+    help="Resume the most recent session for the project (opencode only).",
+)
 @click.argument("args", nargs=-1, type=click.UNPROCESSED)
 def run(
     agent: str | None,
@@ -207,6 +215,7 @@ def run(
     profile: str | None,
     dry_run: bool,
     no_build: bool,
+    continue_session: bool,
     args: tuple[str, ...],
 ) -> None:
     """Launch a harness inside the jail."""
@@ -216,6 +225,7 @@ def run(
         profile=profile,
         dry_run=dry_run,
         no_build=no_build,
+        continue_session=continue_session,
         command=None,
         args=args,
         named=True,
@@ -257,8 +267,17 @@ def shell(
 @app.command()
 @click.option("--yes", "-y", is_flag=True, help="Do not prompt for confirmation.")
 @click.option("--force", is_flag=True, help="Force removal of the image.")
-def clean(yes: bool, force: bool) -> None:
-    """Remove the configured container image."""
+@click.option(
+    "--state",
+    is_flag=True,
+    help="Remove persisted agent session state instead of the image.",
+)
+def clean(yes: bool, force: bool, state: bool) -> None:
+    """Remove the configured container image or persisted session state."""
+    if state:
+        _clean_state(yes)
+        return
+
     config = _load_config()
 
     if not _image_present(config.image):
@@ -280,6 +299,22 @@ def clean(yes: bool, force: bool) -> None:
     else:
         console.print(f"[red]Failed to remove[/] {config.image}")
         raise click.exceptions.Exit(code=1)
+
+
+def _clean_state(yes: bool) -> None:
+    """Remove tether's persisted per-project session state."""
+    root = state_dir() / "sessions"
+    if not root.exists():
+        console.print("No persisted session state found.")
+        return
+    if not yes and not click.confirm(f"Remove persisted session state at {root}?"):
+        console.print("Aborted.")
+        raise click.exceptions.Exit(code=1)
+    shutil.rmtree(root, ignore_errors=True)
+    if root.exists():
+        console.print(f"[red]Failed to remove[/] {root}")
+        raise click.exceptions.Exit(code=1)
+    console.print(f"[green]Removed[/] {root}")
 
 
 @app.command()
@@ -350,6 +385,7 @@ def _launch(
     no_build: bool,
     command: tuple[str, ...] | None,
     args: tuple[str, ...],
+    continue_session: bool = False,
     named: bool = True,
 ) -> None:
     config = _load_config()
@@ -357,6 +393,7 @@ def _launch(
     profile_config = config.profile_for(profile_name)
     agent_name = agent or profile_config.agent
 
+    resume_flag: str | None = None
     if command is None:
         try:
             spec = get_agent(agent_name)
@@ -364,8 +401,15 @@ def _launch(
             console.print(f"[red]unknown agent:[/] {agent_name}")
             raise click.exceptions.Exit(code=1) from exc
         base_command = spec.command
+        resume_flag = spec.resume_flag
     else:
         base_command = command
+
+    if continue_session:
+        if resume_flag is None:
+            console.print(f"[red]error:[/] {agent_name} does not support --continue")
+            raise click.exceptions.Exit(code=1)
+        base_command = (*base_command, resume_flag)
 
     try:
         project_dir = resolve_project(project or Path.cwd())
@@ -385,6 +429,7 @@ def _launch(
             opencode_mounts, opencode_temps, opencode_env = opencode_config_mounts()
             mounts.extend(opencode_mounts)
             staged_files.extend(opencode_temps)
+            mounts.extend(opencode_state_mounts(project_dir))
 
         aws_env: dict[str, str] = {}
         container_name: str | None = None
@@ -473,6 +518,9 @@ def _launch(
             console.print(f"[red]error:[/] {exc}")
             raise click.exceptions.Exit(code=1) from exc
         raise click.exceptions.Exit(code=code)
+    except MountError as exc:
+        console.print(f"[red]mount error:[/] {exc}")
+        raise click.exceptions.Exit(code=1) from exc
     finally:
         for staged in staged_files:
             staged.cleanup()

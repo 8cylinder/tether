@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import posixpath
 from dataclasses import dataclass
 from pathlib import Path
 
 from tether.config import Mount
+from tether.platform import state_dir
 from tether.staging import READ_ONLY_MODE, StagedFile, stage
 
 WORKSPACE = "/workspace"
@@ -17,6 +19,9 @@ CONTAINER_CLAUDE_JSON = "/tmp/tether-home/.claude.json"
 CONTAINER_AWS_CREDENTIALS = "/tmp/tether-home/.aws/credentials"
 CONTAINER_OPENCODE_CONFIG_DIR = "/tmp/tether-home/opencode-config"
 CONTAINER_OPENCODE_CONFIG_BASE = "/tmp/tether-home/opencode-config-file"
+CONTAINER_OPENCODE_DATA_DIR = "/tmp/tether-home/.local/share/opencode"
+CONTAINER_OPENCODE_STATE_DIR = "/tmp/tether-home/.local/state/opencode"
+STATE_DIR_MODE = 0o700
 
 
 class MountError(ValueError):
@@ -155,6 +160,47 @@ def claude_config_mounts() -> tuple[list[ContainerMount], list[StagedFile]]:
 def _copy_opencode_config(source: Path) -> StagedFile:
     """Stage *source*, following symlinks, for read-only mounting."""
     return stage(source.read_bytes(), mode=READ_ONLY_MODE, suffix=source.suffix)
+
+
+def _ensure_private_dir(path: Path) -> Path:
+    """Create *path* (and parents) mode-0700 and return it."""
+    path.mkdir(parents=True, exist_ok=True)
+    path.chmod(STATE_DIR_MODE)
+    return path
+
+
+def project_state_dir(project: Path) -> Path:
+    """Return tether's private persisted-state root for *project*.
+
+    The root is keyed by the resolved project path so sessions from different
+    projects never mix; the container's own working directory is always
+    ``/workspace``, which keeps each agent's session keys stable across runs.
+    """
+    digest = hashlib.sha256(str(project.resolve()).encode()).hexdigest()[:16]
+    return _ensure_private_dir(state_dir() / "sessions" / digest)
+
+
+def opencode_state_mounts(project: Path) -> list[ContainerMount]:
+    """Return read-write mounts that persist opencode sessions for *project*.
+
+    opencode keeps sessions and snapshots under ``$HOME``, which is ephemeral
+    inside the jail. Mounting per-project host directories over the data and
+    state paths preserves them across container runs so ``opencode --continue``
+    and ``opencode --session`` can resume prior work.
+
+    Raises:
+        MountError: when the state directory cannot be prepared.
+    """
+    try:
+        root = project_state_dir(project) / "opencode"
+        data = _ensure_private_dir(root / "data")
+        state = _ensure_private_dir(root / "state")
+    except OSError as exc:
+        raise MountError(f"could not prepare opencode session state: {exc}") from exc
+    return [
+        ContainerMount(source=data, target=CONTAINER_OPENCODE_DATA_DIR, mode="rw"),
+        ContainerMount(source=state, target=CONTAINER_OPENCODE_STATE_DIR, mode="rw"),
+    ]
 
 
 def opencode_config_mounts() -> tuple[list[ContainerMount], list[StagedFile], dict[str, str]]:

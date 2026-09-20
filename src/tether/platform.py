@@ -46,3 +46,14 @@ def config_dir() -> Path:
     base = os.environ.get("XDG_CONFIG_HOME")
     root = Path(base) if base else Path.home() / ".config"
     return root / "tether"
+
+
+def state_dir() -> Path:
+    """Return the tether state directory, honoring ``XDG_STATE_HOME``.
+
+    Persisted agent session state lives here so containers can resume sessions
+    across runs.
+    """
+    base = os.environ.get("XDG_STATE_HOME")
+    root = Path(base) if base else Path.home() / ".local" / "state"
+    return root / "tether"

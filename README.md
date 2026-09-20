@@ -4,10 +4,11 @@ Run AI coding agents in a container confined to a project directory.
 
 `tether` launches harnesses such as [Claude Code](https://claude.com/product/claude-code),
 [opencode](https://opencode.ai), and the [Gemini CLI](https://github.com/google-gemini/gemini-cli)
-inside an ephemeral Docker container. Only the target project is mounted from the
-host, with `.git` mounted read-only, so the agent's permission prompts can be
-disabled without risking the rest of your filesystem: the worst case is that it
-damages the container or the git-backed project.
+inside an ephemeral Docker container. The target project is mounted from the
+host with `.git` mounted read-only, plus a private directory for session state,
+so the agent's permission prompts can be disabled without risking the rest of
+your filesystem: the worst case is that it damages the container or the
+git-backed project.
 
 ## Why
 
@@ -15,7 +16,8 @@ Agentic coding tools are most useful when they can run without stopping to ask
 for approval on every edit and command. That is only safe if the blast radius is
 bounded. `tether` bounds it:
 
-- The host filesystem outside the project is **not visible** inside the jail.
+- The host filesystem outside the project and tether's own session-state
+  directory is **not visible** inside the jail.
 - `.git` is mounted read-only, so history and the object database cannot be
   rewritten or deleted — even by `rm -rf /workspace`.
 - Each agent runs with permissive flags: `opencode --auto`, `gemini --yolo`,
@@ -72,13 +74,15 @@ tether run --dry-run
 | `tether shell [options] [-- ARGS...]` | Open a shell inside the jail (useful for debugging). |
 | `tether doctor` | Report host, Docker, config, image, and credential readiness. |
 | `tether refresh [CONTAINER]` | Refresh AWS credentials in a running container. |
-| `tether clean [-y] [--force]` | Remove the configured image. |
+| `tether clean [-y] [--force] [--state]` | Remove the configured image, or persisted session state with `--state`. |
 
 `run`/`shell` options:
 
 - `--agent {claude,opencode,gemini}` — override the profile's agent.
 - `-C, --project DIR` — project to confine the agent to (default: cwd).
 - `--profile NAME` — config profile to use (default: the platform name).
+- `--continue` — resume the most recent session for the project (`opencode`
+  only; shorthand for passing `--continue` through).
 - `--dry-run` — print the resolved plan and `docker run` command, then exit.
 - `--no-build` — fail instead of building a missing image.
 
@@ -184,8 +188,21 @@ Credentials are taken from both sources:
 
 Auto-update is disabled (`OPENCODE_DISABLE_AUTOUPDATE=1`) because the container
 image pins the opencode version at build time. Rebuild the image to pick up a
-newer release. Session data (`opencode.db`, snapshots) stays inside the
-container and is discarded on exit; host sessions are not shared.
+newer release.
+
+Sessions survive container restarts. opencode stores sessions, snapshots, and
+prompt history under `$HOME`, which is ephemeral inside the jail, so tether
+bind-mounts per-project host directories read-write over those paths:
+
+- `~/.local/state/tether/sessions/<project-hash>/opencode/data` →
+  `$HOME/.local/share/opencode`
+- `~/.local/state/tether/sessions/<project-hash>/opencode/state` →
+  `$HOME/.local/state/opencode`
+
+Because the container working directory is always `/workspace`, session keys are
+stable across runs: `tether run --continue` (or `opencode --continue` /
+`opencode --session <id>` passed through) resumes prior work. State is private
+(mode `0700`) and isolated per project. Remove it with `tether clean --state`.
 
 ## Safety model
 
@@ -201,8 +218,10 @@ docker run --rm --init --workdir /workspace \
   tether:latest <agent> <auto-approve flags>
 ```
 
-- **Only the project is mounted.** No `$HOME`, `~/.ssh`, `~/.aws`,
-  `~/.config`, Docker socket, or SSH agent.
+- **Only the project and tether's own state are mounted.** No host `$HOME`,
+  `~/.ssh`, `~/.aws`, `~/.config`, Docker socket, or SSH agent. The sole
+  exception is `~/.local/state/tether/sessions/`, a private (mode `0700`)
+  per-project directory holding agent session state so sessions can be resumed.
 - **`.git` is read-only.** A nested read-only bind mount cannot be removed or
   written from inside the container, so history survives and can be restored
   with `git checkout`.

@@ -15,6 +15,7 @@ class AgentSpec:
     name: AgentName
     command: tuple[str, ...]
     description: str = ""
+    resume_flag: str | None = None
 
 
 AGENTS: dict[str, AgentSpec] = {
@@ -27,6 +28,7 @@ AGENTS: dict[str, AgentSpec] = {
         name="opencode",
         command=("opencode",),
         description="opencode",
+        resume_flag="--continue",
     ),
     "gemini": AgentSpec(
         name="gemini",
