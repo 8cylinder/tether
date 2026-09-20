@@ -93,6 +93,7 @@ def test_run_continue_passes_flag_to_opencode(
     monkeypatch.setattr(cli, "_load_config", Config)
     monkeypatch.setattr(cli, "opencode_config_mounts", lambda: ([], [], {}))
     monkeypatch.setattr(cli, "opencode_state_mounts", lambda _project: [])
+    monkeypatch.setattr(cli, "opencode_has_session", lambda _project: True)
     monkeypatch.setattr(cli, "opencode_auth_env", dict)
 
     result = CliRunner().invoke(
@@ -102,6 +103,25 @@ def test_run_continue_passes_flag_to_opencode(
 
     assert result.exit_code == 0
     assert "--continue" in result.output
+
+
+def test_run_continue_without_session_starts_fresh(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli, "_load_config", Config)
+    monkeypatch.setattr(cli, "opencode_config_mounts", lambda: ([], [], {}))
+    monkeypatch.setattr(cli, "opencode_state_mounts", lambda _project: [])
+    monkeypatch.setattr(cli, "opencode_has_session", lambda _project: False)
+    monkeypatch.setattr(cli, "opencode_auth_env", dict)
+
+    result = CliRunner().invoke(
+        cli.app,
+        ["run", "--agent", "opencode", "--continue", "--dry-run", "-C", str(tmp_path)],
+    )
+
+    assert result.exit_code == 0
+    assert "starting a new one" in result.output
+    assert "--continue" not in result.output
 
 
 def test_run_continue_rejects_unsupported_agent(

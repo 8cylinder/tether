@@ -64,6 +64,7 @@ from tether.mounts import (
     resolve_project,
 )
 from tether.platform import default_profile_name, find_docker, host_info, state_dir
+from tether.sessions import opencode_has_session
 from tether.staging import StagedFile
 
 console = Console()
@@ -405,11 +406,9 @@ def _launch(
     else:
         base_command = command
 
-    if continue_session:
-        if resume_flag is None:
-            console.print(f"[red]error:[/] {agent_name} does not support --continue")
-            raise click.exceptions.Exit(code=1)
-        base_command = (*base_command, resume_flag)
+    if continue_session and resume_flag is None:
+        console.print(f"[red]error:[/] {agent_name} does not support --continue")
+        raise click.exceptions.Exit(code=1)
 
     try:
         project_dir = resolve_project(project or Path.cwd())
@@ -417,6 +416,14 @@ def _launch(
     except MountError as exc:
         console.print(f"[red]mount error:[/] {exc}")
         raise click.exceptions.Exit(code=1) from exc
+
+    if continue_session and resume_flag is not None:
+        if agent_name == "opencode" and not opencode_has_session(project_dir):
+            console.print(
+                "[yellow]no previous opencode session for this project;[/] starting a new one"
+            )
+        else:
+            base_command = (*base_command, resume_flag)
 
     staged_files: list[StagedFile] = []
     opencode_env: dict[str, str] = {}

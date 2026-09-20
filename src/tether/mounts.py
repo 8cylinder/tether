@@ -169,6 +169,12 @@ def _ensure_private_dir(path: Path) -> Path:
     return path
 
 
+def _project_state_root(project: Path) -> Path:
+    """Return (without creating) tether's persisted-state root for *project*."""
+    digest = hashlib.sha256(str(project.resolve()).encode()).hexdigest()[:16]
+    return state_dir() / "sessions" / digest
+
+
 def project_state_dir(project: Path) -> Path:
     """Return tether's private persisted-state root for *project*.
 
@@ -176,8 +182,12 @@ def project_state_dir(project: Path) -> Path:
     projects never mix; the container's own working directory is always
     ``/workspace``, which keeps each agent's session keys stable across runs.
     """
-    digest = hashlib.sha256(str(project.resolve()).encode()).hexdigest()[:16]
-    return _ensure_private_dir(state_dir() / "sessions" / digest)
+    return _ensure_private_dir(_project_state_root(project))
+
+
+def opencode_data_dir(project: Path) -> Path:
+    """Return the host directory backing opencode's data dir for *project*."""
+    return _project_state_root(project) / "opencode" / "data"
 
 
 def opencode_state_mounts(project: Path) -> list[ContainerMount]:

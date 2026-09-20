@@ -82,7 +82,8 @@ tether run --dry-run
 - `-C, --project DIR` — project to confine the agent to (default: cwd).
 - `--profile NAME` — config profile to use (default: the platform name).
 - `--continue` — resume the most recent session for the project (`opencode`
-  only; shorthand for passing `--continue` through).
+  only; shorthand for passing `--continue` through). If no prior session
+  exists, tether starts a new one rather than letting opencode error.
 - `--dry-run` — print the resolved plan and `docker run` command, then exit.
 - `--no-build` — fail instead of building a missing image.
 
@@ -201,8 +202,11 @@ bind-mounts per-project host directories read-write over those paths:
 
 Because the container working directory is always `/workspace`, session keys are
 stable across runs: `tether run --continue` (or `opencode --continue` /
-`opencode --session <id>` passed through) resumes prior work. State is private
-(mode `0700`) and isolated per project. Remove it with `tether clean --state`.
+`opencode --session <id>` passed through) resumes prior work. `tether run
+--continue` checks for an existing session first and starts fresh when there is
+none (opencode itself aborts with a server error on an empty store). State is
+private (mode `0700`) and isolated per project. Remove it with
+`tether clean --state`.
 
 ## Safety model
 

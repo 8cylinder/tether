@@ -25,7 +25,7 @@ The CLI (`cli.py`) is a Click group with commands: `init`, `build`, `run`, `shel
 
 1. **config.py** — Pydantic models loaded from `~/.config/tether/config.toml`. Profiles are keyed by platform name (`linux`, `darwin`) and carry agent choice, env vars, extra mounts, and resource limits. Missing config file returns defaults.
 
-2. **agents.py** — Static registry of `AgentSpec` definitions mapping agent names (`claude`, `opencode`, `gemini`) to their commands and auto-approve flags. `AgentName` is a `Literal` type used for validation throughout.
+2. **agents.py** — Static registry of `AgentSpec` definitions mapping agent names (`claude`, `opencode`, `gemini`) to their commands, auto-approve flags, and optional `resume_flag` used by `tether run --continue`. `AgentName` is a `Literal` type used for validation throughout.
 
 3. **mounts.py** — Builds the mount policy: project at `/workspace:rw`, `.git` overlay at `/workspace/.git:ro`, plus user-configured extra mounts. Also mounts per-agent host config read-only when the agent is supported (`~/.claude` for Claude, `~/.config/opencode` for opencode), and per-project opencode session state read-write under `state_dir()/sessions/<hash>/opencode/` so sessions resume across container runs. The read-only `.git` overlay is the core safety mechanism.
 
@@ -36,6 +36,8 @@ The CLI (`cli.py`) is a Click group with commands: `init`, `build`, `run`, `shel
 6. **platform.py** — Host detection (OS, uid/gid, Docker path, XDG config and state dirs). Profile name defaults to `platform.system().lower()`.
 
 7. **assets/docker/** — Bundled Dockerfile (node:22-bookworm-slim base with all three agent CLIs installed globally via npm) and entrypoint script that handles arbitrary uid mapping.
+
+8. **sessions.py** — `opencode_has_session(project)` reads the persisted opencode SQLite database to decide whether `tether run --continue` has anything to resume. opencode aborts with an opaque server error on an empty store, so `_launch` falls back to a fresh session when the check returns false.
 
 ## Conventions
 
