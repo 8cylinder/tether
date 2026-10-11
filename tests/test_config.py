@@ -103,3 +103,28 @@ def test_resolve_mounts_no_create(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
 
     assert mounts == []
     assert skipped == [("~/.claude", "does not exist")]
+
+
+def _opencode_config(tmp_path: Path, mounts: list[str]) -> Config:
+    return Config(
+        path=tmp_path / "config.toml",
+        default_agent="opencode",
+        mounts={"opencode": mounts},
+    )
+
+
+def test_resolve_mounts_uses_logical_path_for_symlinked_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    real_dir = tmp_path / "store" / "opencode"
+    real_dir.mkdir(parents=True)
+    logical = tmp_path / ".config" / "opencode"
+    logical.parent.mkdir(parents=True)
+    logical.symlink_to(real_dir)
+
+    config = _opencode_config(tmp_path, ["~/.config/opencode"])
+    mounts, skipped = resolve_mounts(config, "opencode")
+
+    assert mounts == [(str(real_dir), "/home/tether/.config/opencode")]
+    assert skipped == []

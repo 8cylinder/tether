@@ -113,27 +113,43 @@ def resolve_mounts(
     Returns ``(mounts, skipped)`` where ``mounts`` is a list of
     ``(host_path, container_path)`` pairs and ``skipped`` records paths that
     could not be mounted with a reason.
+
+    The bind source is resolved (following symlinks) while the container path is
+    derived from the logical path, so a symlinked mount directory still lands
+    where the harness looks for it.
     """
     mounts: list[tuple[str, str]] = []
     skipped: list[tuple[str, str]] = []
-    seen: set[str] = set()
+    seen_hosts: set[str] = set()
+    seen_containers: set[str] = set()
+
+    def add(host: Path, container: str) -> None:
+        host_str = str(host)
+        if host_str in seen_hosts or container in seen_containers:
+            return
+        seen_hosts.add(host_str)
+        seen_containers.add(container)
+        mounts.append((host_str, container))
 
     for raw in config.raw_mounts_for(agent):
-        host = expand_host_path(raw)
-        if not host.exists():
-            if looks_like_file(host):
+        logical = expand_host_path(raw)
+
+        if logical.is_symlink() and not logical.exists():
+            skipped.append((raw, "broken symlink"))
+            continue
+
+        if not logical.exists():
+            if looks_like_file(logical):
                 skipped.append((raw, "file does not exist"))
                 continue
             if create_missing:
-                host.mkdir(parents=True, exist_ok=True)
+                logical.mkdir(parents=True, exist_ok=True)
             else:
                 skipped.append((raw, "does not exist"))
                 continue
 
-        host_str = str(host)
-        if host_str in seen:
-            continue
-        seen.add(host_str)
-        mounts.append((host_str, container_path_for(host)))
+        container = container_path_for(logical)
+        source = logical.resolve()
+        add(source, container)
 
     return mounts, skipped

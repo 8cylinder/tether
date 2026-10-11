@@ -13,11 +13,15 @@ IMAGE_NAME = "tether:latest"
 
 
 def expand_host_path(raw: str) -> Path:
-    """Expand ``~`` and environment variables, then resolve to an absolute path."""
-    expanded = Path(os.path.expanduser(os.path.expandvars(raw)))
-    if not expanded.is_absolute():
-        expanded = Path.cwd() / expanded
-    return expanded.resolve()
+    """Expand ``~`` and environment variables into a normalized absolute path.
+
+    Symlinks are deliberately *not* resolved here. The logical path is used to
+    decide where the mount lands in the container, while the bind source is
+    resolved separately (see :func:`tether.config.resolve_mounts`). Resolving
+    both would move a symlinked mount to the wrong container path.
+    """
+    expanded = os.path.expanduser(os.path.expandvars(raw))
+    return Path(os.path.abspath(expanded))
 
 
 def looks_like_file(path: Path) -> bool:
