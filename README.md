@@ -77,6 +77,10 @@ mount = [
 - Missing directories are created on first run; missing files are skipped with a
   warning (a file such as `~/.claude.json` will appear once the host tool
   creates it).
+- Symlinks at the top level of a mounted directory that point outside it (for
+  example an `opencode.jsonc` linked to `~/dotfiles/opencode.jsonc`) are mounted
+  too, at the path they resolve to inside the container, so they still resolve.
+  Broken links are reported and skipped.
 
 ## Development
 

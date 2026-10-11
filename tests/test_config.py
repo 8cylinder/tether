@@ -128,3 +128,77 @@ def test_resolve_mounts_uses_logical_path_for_symlinked_dir(
 
     assert mounts == [(str(real_dir), "/home/tether/.config/opencode")]
     assert skipped == []
+
+
+def test_resolve_mounts_mounts_absolute_file_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    target = tmp_path / "store" / "opencode.jsonc"
+    target.parent.mkdir(parents=True)
+    target.write_text("{}", encoding="utf-8")
+    config_dir = tmp_path / ".config" / "opencode"
+    config_dir.mkdir(parents=True)
+    (config_dir / "opencode.jsonc").symlink_to(target)
+
+    config = _opencode_config(tmp_path, ["~/.config/opencode"])
+    mounts, skipped = resolve_mounts(config, "opencode")
+
+    assert (str(config_dir), "/home/tether/.config/opencode") in mounts
+    assert (str(target), str(target)) in mounts
+    assert skipped == []
+
+
+def test_resolve_mounts_mounts_relative_outward_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    shared = tmp_path / "shared"
+    shared.mkdir()
+    target = shared / "models.jsonc"
+    target.write_text("{}", encoding="utf-8")
+    config_dir = tmp_path / ".config" / "opencode"
+    config_dir.mkdir(parents=True)
+    (config_dir / "opencode.jsonc").symlink_to("../../shared/models.jsonc")
+
+    config = _opencode_config(tmp_path, ["~/.config/opencode"])
+    mounts, skipped = resolve_mounts(config, "opencode")
+
+    assert (str(target), "/home/tether/shared/models.jsonc") in mounts
+    assert skipped == []
+
+
+def test_resolve_mounts_skips_internal_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    config_dir = tmp_path / ".config" / "opencode"
+    config_dir.mkdir(parents=True)
+    (config_dir / "real.jsonc").write_text("{}", encoding="utf-8")
+    (config_dir / "link.jsonc").symlink_to("real.jsonc")
+
+    config = _opencode_config(tmp_path, ["~/.config/opencode"])
+    mounts, skipped = resolve_mounts(config, "opencode")
+
+    assert mounts == [(str(config_dir), "/home/tether/.config/opencode")]
+    assert skipped == []
+
+
+def test_resolve_mounts_reports_broken_symlinks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    config_dir = tmp_path / ".config" / "opencode"
+    config_dir.mkdir(parents=True)
+    (config_dir / "gone.jsonc").symlink_to(config_dir / "missing.jsonc")
+    missing = tmp_path / ".config" / "missing"
+    missing.symlink_to(missing.parent / "nope")
+
+    config = _opencode_config(tmp_path, ["~/.config/opencode", "~/.config/missing"])
+    mounts, skipped = resolve_mounts(config, "opencode")
+
+    assert mounts == [(str(config_dir), "/home/tether/.config/opencode")]
+    assert skipped == [
+        (str(config_dir / "gone.jsonc"), "broken symlink"),
+        ("~/.config/missing", "broken symlink"),
+    ]

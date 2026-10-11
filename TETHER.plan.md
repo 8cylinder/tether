@@ -44,7 +44,22 @@ Container names are **not** a problem: this version is ephemeral
 - Add a global `--image NAME` option.
 - Document both in `README.md` and `--help`.
 
-### 4. Recommended usage for coexistence
+### 4. Symlinked config files
+
+Harness config files are sometimes symlinks pointing outside their config
+directory (for example `~/.config/opencode/opencode.jsonc` linked to
+`~/dotfiles/opencode.jsonc`). Docker copies symlinks verbatim into a mount, so
+such a link dangles in the container and the harness silently loses its
+settings (including the selected model).
+
+- Resolve the *source* of a mount, but compute its container path from the
+  logical (pre-resolution) path, so a symlinked mount directory still lands where
+  the harness expects it.
+- For each top-level symlink inside a mounted directory that points outside it,
+  add a bind mount of the resolved target at the path the link resolves to in
+  the container. Report broken links and skip them.
+
+### 5. Recommended usage for coexistence
 
 Set these in the shell profile to fully separate the two apps:
 
@@ -66,11 +81,15 @@ tether --config ~/.config/tether-agent/config.toml run
 2. `util.py` / `docker.py`: resolve image name from arg/env/config.
 3. `cli.py`: add global `--config` and `--image` options and thread them through
    `run`, `build`, `shell`, `info`, `clean`.
-4. `README.md`: document the isolation variables.
-5. Tests:
+4. `util.py` / `config.py`: keep the logical path for container placement and
+   resolve only the bind source; mount outward-pointing top-level symlinks.
+5. `README.md`: document the isolation variables and symlink behavior.
+6. Tests:
    - config path from `TETHER_CONFIG` and `--config`
    - image resolution precedence
    - ensure existing config file is never overwritten
+   - symlinked mount dir, absolute/relative symlinked files, internal links,
+     broken links
 
 ## Verification
 

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 import tomllib
 import warnings
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -117,6 +119,10 @@ def resolve_mounts(
     The bind source is resolved (following symlinks) while the container path is
     derived from the logical path, so a symlinked mount directory still lands
     where the harness looks for it.
+
+    For every mounted directory, top-level symlinks that point *outside* the
+    directory are also mounted at the path they resolve to inside the container
+    (Docker does not follow symlinks within a bind-mounted tree).
     """
     mounts: list[tuple[str, str]] = []
     skipped: list[tuple[str, str]] = []
@@ -152,4 +158,52 @@ def resolve_mounts(
         source = logical.resolve()
         add(source, container)
 
+        if source.is_dir():
+            _add_symlink_mounts(source, container, add, skipped)
+
     return mounts, skipped
+
+
+def _add_symlink_mounts(
+    host_dir: Path,
+    container_dir: str,
+    add: Callable[[Path, str], None],
+    skipped: list[tuple[str, str]],
+) -> None:
+    """Bind-mount top-level symlinks inside ``host_dir`` so they resolve.
+
+    Docker copies symlinks in a bind-mounted tree verbatim, so a link pointing
+    outside the tree dangles in the container. Each such link gets one extra
+    mount of its resolved target at the path the link resolves to *inside* the
+    container.
+    """
+    try:
+        entries = sorted(host_dir.iterdir())
+    except OSError as exc:
+        skipped.append((str(host_dir), f"cannot scan directory: {exc}"))
+        return
+
+    for entry in entries:
+        if not entry.is_symlink():
+            continue
+
+        target = Path(os.path.realpath(entry))
+        if not target.exists():
+            skipped.append((str(entry), "broken symlink"))
+            continue
+
+        try:
+            target.relative_to(host_dir)
+        except ValueError:
+            pass
+        else:
+            continue  # stays inside the mounted tree, so it already resolves
+
+        link = os.readlink(entry)
+        if os.path.isabs(link):
+            destination = os.path.normpath(link)
+        else:
+            container_entry = Path(container_dir) / entry.name
+            destination = os.path.normpath(os.path.join(container_entry.parent, link))
+
+        add(target, destination)
