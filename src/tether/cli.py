@@ -9,7 +9,13 @@ import click
 from tether import __version__, docker
 from tether.config import ConfigError, load_config, resolve_mounts
 from tether.harnesses import AGENT_CHOICES, HARNESSES
-from tether.util import IMAGE_NAME, container_path_for, expand_host_path, host_uid_gid
+from tether.util import (
+    CONTAINER_WORKDIR,
+    IMAGE_NAME,
+    container_path_for,
+    expand_host_path,
+    host_uid_gid,
+)
 
 
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
@@ -40,6 +46,13 @@ def _show_skipped(skipped: list[tuple[str, str]]) -> None:
         click.echo(f"warning: skipping mount {raw} ({reason})", err=True)
 
 
+def _show_mounts(workdir: Path, mounts: list[tuple[str, str]]) -> None:
+    click.echo("Mounts:")
+    click.echo(f"  {workdir} -> {CONTAINER_WORKDIR}")
+    for host, container in mounts:
+        click.echo(f"  {host} -> {container}")
+
+
 @main.command()
 @click.option(
     "--agent",
@@ -65,6 +78,7 @@ def run(agent: str | None, workdir: Path | None) -> None:
 
     mounts, skipped = resolve_mounts(config, agent)
     _show_skipped(skipped)
+    _show_mounts(host_workdir, mounts)
 
     click.echo(f"Running {harness.description} in {host_workdir} (mounted at /workdir).")
     code = docker.run_container(
@@ -133,6 +147,7 @@ def shell(workdir: Path | None) -> None:
     host_workdir = (workdir or Path.cwd()).resolve()
     mounts, skipped = resolve_mounts(config, config.default_agent)
     _show_skipped(skipped)
+    _show_mounts(host_workdir, mounts)
 
     code = docker.run_container(IMAGE_NAME, host_workdir, mounts, ["bash"])
     raise SystemExit(code)
