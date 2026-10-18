@@ -6,7 +6,7 @@ import os
 import tomllib
 import warnings
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from tether.harnesses import DEFAULT_AGENT, HARNESSES
@@ -22,10 +22,14 @@ CONFIG_TEMPLATE = """\
 # settings, prompts and history survive between sessions. `~` and environment
 # variables are expanded. Missing directories are created on first run; missing
 # files are skipped.
+#
+# `args` sets the arguments passed to the harness when it starts. Omit it to
+# use the harness defaults.
 
 default = "opencode"
 
 [opencode]
+args = ["--auto"]
 mount = [
     "~/.config/opencode",
     "~/.local/share/opencode",
@@ -57,9 +61,13 @@ class Config:
     path: Path
     default_agent: str
     mounts: dict[str, list[str]]
+    args: dict[str, list[str]] = field(default_factory=dict)
 
     def raw_mounts_for(self, agent: str) -> list[str]:
         return list(self.mounts.get(agent, HARNESSES[agent].default_mounts))
+
+    def args_for(self, agent: str) -> list[str]:
+        return list(self.args.get(agent, HARNESSES[agent].default_args))
 
 
 def load_config(path: Path | None = None, *, create: bool = True) -> Config:
@@ -86,6 +94,7 @@ def load_config(path: Path | None = None, *, create: bool = True) -> Config:
         default_agent = DEFAULT_AGENT
 
     mounts: dict[str, list[str]] = {}
+    args: dict[str, list[str]] = {}
     for name, harness in HARNESSES.items():
         section = data.get(name)
         if section is None:
@@ -93,15 +102,25 @@ def load_config(path: Path | None = None, *, create: bool = True) -> Config:
             continue
         if not isinstance(section, dict):
             raise ConfigError(f"Section [{name}] must be a table.")
-        raw = section.get("mount")
-        if raw is None:
-            mounts[name] = list(harness.default_mounts)
-        elif not isinstance(raw, list) or not all(isinstance(item, str) for item in raw):
-            raise ConfigError(f"[{name}].mount must be a list of strings.")
-        else:
-            mounts[name] = list(raw)
+        mounts[name] = _string_list(section.get("mount"), harness.default_mounts, name, "mount")
+        raw_args = section.get("args")
+        if raw_args is not None:
+            args[name] = _string_list(raw_args, harness.default_args, name, "args")
 
-    return Config(path=config_path, default_agent=default_agent, mounts=mounts)
+    return Config(
+        path=config_path,
+        default_agent=default_agent,
+        mounts=mounts,
+        args=args,
+    )
+
+
+def _string_list(value: object, default: tuple[str, ...], agent: str, key: str) -> list[str]:
+    if value is None:
+        return list(default)
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ConfigError(f"[{agent}].{key} must be a list of strings.")
+    return list(value)
 
 
 def resolve_mounts(

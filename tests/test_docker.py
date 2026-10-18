@@ -41,6 +41,18 @@ def test_build_image(recorder: Recorder) -> None:
     assert "--tag" in command and "tether:latest" in command
     assert "UID=1001" in command
     assert "GID=1002" in command
+    assert "--no-cache" not in command
+    assert "--pull" not in command
+
+
+def test_build_image_update_software(recorder: Recorder) -> None:
+    docker.build_image("tether:latest", uid=1001, gid=1002, update_software=True)
+
+    command = recorder.commands[0]
+    assert "--no-cache" in command
+    assert "--pull" in command
+    assert "UID=1001" in command
+    assert "GID=1002" in command
 
 
 def test_build_image_failure(monkeypatch: pytest.MonkeyPatch) -> None:

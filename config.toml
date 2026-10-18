@@ -1,0 +1,48 @@
+# Sample tether configuration.
+#
+# Copy this file to ~/.config/tether/config.toml and adjust as needed.
+# Every field is shown with its default value.
+
+# Harness used by `tether run` when --agent is omitted.
+# Default: "opencode"
+# Valid values: "opencode", "claude", "antigravity"
+default = "opencode"
+
+[opencode]
+# Arguments passed to the harness when it starts.
+# Omit to use the harness default; use [] to pass none.
+# Default: ["--auto"]
+args = ["--auto"]
+
+# Host paths bind-mounted into the container. `~` and environment variables
+# are expanded. Missing directories are created on first run; missing files are
+# skipped. Omit to use the harness default.
+# Default: ["~/.config/opencode", "~/.local/share/opencode",
+#           "~/.local/state/opencode", "~/.cache/opencode"]
+mount = [
+    "~/.config/opencode",
+    "~/.local/share/opencode",
+    "~/.local/state/opencode",
+    "~/.cache/opencode",
+]
+
+[claude]
+# Default: [] (no arguments)
+args = []
+
+# Default: ["~/.claude", "~/.claude.json", "~/.config/claude"]
+mount = [
+    "~/.claude",
+    "~/.claude.json",
+    "~/.config/claude",
+]
+
+[antigravity]
+# Default: [] (no arguments)
+args = []
+
+# Default: ["~/.gemini/antigravity-cli", "~/.antigravity"]
+mount = [
+    "~/.gemini/antigravity-cli",
+    "~/.antigravity",
+]

@@ -6,11 +6,11 @@ being able to damage your host outside the mounted project directory.
 
 Supported harnesses:
 
-| name          | command    | description            |
-| ------------- | ---------- | ---------------------- |
-| `opencode`    | `opencode` | OpenCode               |
-| `claude`      | `claude`   | Anthropic Claude Code  |
-| `antigravity` | `agy`      | Google Antigravity     |
+| name          | command             | description            |
+| ------------- | ------------------- | ---------------------- |
+| `opencode`    | `opencode --auto`   | OpenCode               |
+| `claude`      | `claude`            | Anthropic Claude Code  |
+| `antigravity` | `agy`               | Google Antigravity     |
 
 ## Requirements
 
@@ -28,6 +28,7 @@ uv run tether --help
 
 ```bash
 tether build                    # build/rebuild the container image
+tether build --update-software  # rebuild and upgrade all installed software
 tether run                      # run the default harness
 tether run --agent=opencode     # run a specific harness
 tether shell                    # interactive shell at /workdir
@@ -44,12 +45,13 @@ tether reads `~/.config/tether/config.toml` (created automatically on first
 run). `default` selects the harness used by `tether run` when `--agent` is
 omitted. Each harness section lists the host paths that are bind-mounted into
 the container so that settings, prompts and history carry over between
-sessions.
+sessions, and the `args` passed to the harness when it starts.
 
 ```toml
 default = "opencode"
 
 [opencode]
+args = ["--auto"]
 mount = [
     "~/.config/opencode",
     "~/.local/share/opencode",
@@ -71,6 +73,9 @@ mount = [
 ]
 ```
 
+- `args` overrides the arguments passed to the harness; omit it to use the
+  harness defaults (for example `--auto` for `opencode`). Set it to an empty
+  list to pass none.
 - `~` and environment variables are expanded.
 - Host paths under `$HOME` are mounted to the same path under the container
   user's home (`/home/tether`), so the harnesses find their settings.
@@ -95,7 +100,8 @@ make check         # all of the above
 ## Notes
 
 - The harnesses are installed inside the image at build time; only their
-  settings are taken from the host.
+  settings are taken from the host. Run `tether build --update-software` to
+  bypass the build cache and pull the latest base image and tool versions.
 - The image is built with your host UID/GID so files created in `/workdir` stay
   owned by you.
 - OAuth sign-in may not work inside a container without a browser. Prefer

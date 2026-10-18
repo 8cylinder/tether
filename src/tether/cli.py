@@ -80,24 +80,37 @@ def run(agent: str | None, workdir: Path | None) -> None:
     _show_skipped(skipped)
     _show_mounts(host_workdir, mounts)
 
+    command = [*harness.command, *config.args_for(agent)]
     click.echo(f"Running {harness.description} in {host_workdir} (mounted at /workdir).")
     code = docker.run_container(
         IMAGE_NAME,
         host_workdir,
         mounts,
-        [harness.command],
+        command,
     )
     raise SystemExit(code)
 
 
 @main.command()
-def build() -> None:
+@click.option(
+    "--update-software",
+    is_flag=True,
+    help="Ignore the build cache and pull the base image to upgrade all software.",
+)
+def build(update_software: bool) -> None:
     """Build (or rebuild) the container image."""
     _require_docker()
     uid, gid = host_uid_gid()
+    if update_software:
+        click.echo("Updating all container software to the latest versions ...")
     click.echo(f"Building {IMAGE_NAME} (UID={uid}, GID={gid}) ...")
     try:
-        docker.build_image(IMAGE_NAME, uid=uid, gid=gid)
+        docker.build_image(
+            IMAGE_NAME,
+            uid=uid,
+            gid=gid,
+            update_software=update_software,
+        )
     except docker.DockerError as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo(f"Built {IMAGE_NAME}.")
@@ -124,7 +137,8 @@ def info() -> None:
 
     for name, harness in HARNESSES.items():
         marker = "*" if name == config.default_agent else " "
-        click.echo(f" {marker} {name:<12} {harness.command:<8} {harness.description}")
+        command = " ".join([*harness.command, *config.args_for(name)])
+        click.echo(f" {marker} {name:<12} {command:<8} {harness.description}")
         for raw in config.raw_mounts_for(name):
             host = expand_host_path(raw)
             status = "ok" if host.exists() else "missing"

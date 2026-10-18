@@ -54,8 +54,14 @@ def build_image(
     *,
     uid: int,
     gid: int,
+    update_software: bool = False,
 ) -> None:
-    """Build the container image from the bundled Dockerfile."""
+    """Build the container image from the bundled Dockerfile.
+
+    With ``update_software`` the build cache is bypassed and the base image is
+    pulled so apt packages, npm harnesses and the Antigravity CLI are all
+    upgraded to the latest available versions.
+    """
     with tempfile.TemporaryDirectory(prefix="tether-build-") as tmp:
         context = Path(tmp)
         _write_dockerfile(context / "Dockerfile")
@@ -64,6 +70,10 @@ def build_image(
             "build",
             "--tag",
             image,
+        ]
+        if update_software:
+            command += ["--no-cache", "--pull"]
+        command += [
             "--build-arg",
             f"UID={uid}",
             "--build-arg",

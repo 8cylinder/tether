@@ -15,6 +15,7 @@ def test_creates_default_config_when_missing(tmp_path: Path) -> None:
     assert path.exists()
     assert config.default_agent == "opencode"
     assert config.raw_mounts_for("opencode")
+    assert config.args_for("opencode") == ["--auto"]
 
 
 def test_does_not_create_when_disabled(tmp_path: Path) -> None:
@@ -34,6 +35,34 @@ def test_parses_custom_mounts(tmp_path: Path) -> None:
     assert config.default_agent == "claude"
     assert config.raw_mounts_for("claude") == ["/tmp/one", "/tmp/two"]
     assert config.raw_mounts_for("opencode")
+
+
+def test_parses_custom_args(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        'default = "claude"\n[claude]\nargs = ["--verbose", "--model", "opus"]\n',
+        encoding="utf-8",
+    )
+    config = load_config(path)
+
+    assert config.args_for("claude") == ["--verbose", "--model", "opus"]
+
+    assert config.args_for("opencode") == ["--auto"]
+
+
+def test_allows_empty_args(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[opencode]\nargs = []\n", encoding="utf-8")
+    config = load_config(path)
+
+    assert config.args_for("opencode") == []
+
+
+def test_invalid_args_raises(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text('[claude]\nargs = "--verbose"\n', encoding="utf-8")
+    with pytest.raises(ConfigError):
+        load_config(path)
 
 
 def test_accepts_deafault_typo(tmp_path: Path) -> None:

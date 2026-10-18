@@ -10,16 +10,18 @@ class Harness:
     """A supported agent CLI and the host config it needs mounted."""
 
     name: str
-    command: str
+    command: tuple[str, ...]
     description: str
     default_mounts: tuple[str, ...]
+    default_args: tuple[str, ...] = ()
 
 
 HARNESSES: dict[str, Harness] = {
     "opencode": Harness(
         name="opencode",
-        command="opencode",
+        command=("opencode",),
         description="OpenCode",
+        default_args=("--auto",),
         default_mounts=(
             "~/.config/opencode",
             "~/.local/share/opencode",
@@ -29,7 +31,7 @@ HARNESSES: dict[str, Harness] = {
     ),
     "claude": Harness(
         name="claude",
-        command="claude",
+        command=("claude",),
         description="Anthropic Claude Code",
         default_mounts=(
             "~/.claude",
@@ -39,7 +41,7 @@ HARNESSES: dict[str, Harness] = {
     ),
     "antigravity": Harness(
         name="antigravity",
-        command="agy",
+        command=("agy",),
         description="Google Antigravity",
         default_mounts=(
             "~/.gemini/antigravity-cli",
