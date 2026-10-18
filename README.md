@@ -27,17 +27,26 @@ uv run tether --help
 ## Usage
 
 ```bash
-tether build                    # build/rebuild the container image
-tether build --update-software  # rebuild and upgrade all installed software
-tether run                      # run the default harness
-tether run --agent=opencode     # run a specific harness
-tether shell                    # interactive shell at /workdir
-tether info                     # configuration and status
-tether clean                    # remove the built image
+tether build                              # build/rebuild the container image
+tether build --update-software            # rebuild and upgrade all installed software
+tether build --install-completion         # print a command to enable tab completion
+tether build --install-global-completion  # print a system-wide completion command
+tether run                                # run the default harness
+tether run --agent=opencode               # run a specific harness
+tether shell                              # interactive shell at /workdir
+tether info                               # configuration and status
+tether clean                              # remove the built image
 ```
 
 `tether run` and `tether shell` mount the current directory at `/workdir` in a
 fresh, disposable container (`docker run --rm`).
+
+`tether build --install-completion` detects the shell from `$SHELL` and prints a
+command that appends completion setup to the appropriate startup file
+(`~/.bashrc`, `~/.zshrc`, or `~/.config/fish/config.fish`).
+`tether build --install-global-completion` prints commands that install
+completion for all users (the install command requires `sudo`) and load it in
+the current shell. No files are modified until you run the printed commands.
 
 ## Configuration
 

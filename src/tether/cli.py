@@ -7,6 +7,11 @@ from pathlib import Path
 import click
 
 from tether import __version__, docker
+from tether.completion import (
+    CompletionError,
+    completion_command,
+    global_completion_command,
+)
 from tether.config import ConfigError, load_config, resolve_mounts
 from tether.harnesses import AGENT_CHOICES, HARNESSES
 from tether.util import (
@@ -44,6 +49,11 @@ def _require_image() -> None:
 def _show_skipped(skipped: list[tuple[str, str]]) -> None:
     for raw, reason in skipped:
         click.echo(f"warning: skipping mount {raw} ({reason})", err=True)
+
+
+def _show_completion_command(command: str) -> None:
+    click.echo("Copy and paste the following command:")
+    click.secho(command, fg="cyan")
 
 
 def _show_mounts(workdir: Path, mounts: list[tuple[str, str]]) -> None:
@@ -93,12 +103,49 @@ def run(agent: str | None, workdir: Path | None) -> None:
 
 @main.command()
 @click.option(
+    "--install-completion",
+    "install_completion_flag",
+    is_flag=True,
+    help="Print a command that enables shell completion for the current shell.",
+)
+@click.option(
+    "--install-global-completion",
+    "install_global_completion_flag",
+    is_flag=True,
+    help="Print a command that installs shell completion for all users.",
+)
+@click.option(
     "--update-software",
     is_flag=True,
     help="Ignore the build cache and pull the base image to upgrade all software.",
 )
-def build(update_software: bool) -> None:
+def build(
+    install_completion_flag: bool,
+    install_global_completion_flag: bool,
+    update_software: bool,
+) -> None:
     """Build (or rebuild) the container image."""
+    if install_completion_flag and install_global_completion_flag:
+        raise click.UsageError(
+            "--install-completion and --install-global-completion are mutually exclusive."
+        )
+
+    if install_completion_flag:
+        try:
+            command = completion_command()
+        except CompletionError as exc:
+            raise click.ClickException(str(exc)) from exc
+        _show_completion_command(command)
+        return
+
+    if install_global_completion_flag:
+        try:
+            command = global_completion_command()
+        except CompletionError as exc:
+            raise click.ClickException(str(exc)) from exc
+        _show_completion_command(command)
+        return
+
     _require_docker()
     uid, gid = host_uid_gid()
     if update_software:
