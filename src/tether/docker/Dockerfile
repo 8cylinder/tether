@@ -40,8 +40,8 @@ RUN apt-get update \
 
 # AI harnesses installed globally for every user in the image.
 RUN npm install --global \
-        opencode-ai \
-        @anthropic-ai/claude-code \
+        @opencode/cli@latest \
+        @anthropic-ai/claude-code@latest \
     && npm cache clean --force
 
 # Non-root user mirroring the host UID/GID so files stay owned by you.
