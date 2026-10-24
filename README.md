@@ -32,6 +32,7 @@ make install        # optional: install tether as an editable uv tool
 ## Usage
 
 ```bash
+tether                                    # same as tether run
 tether --help                             # same as tether -h
 tether --config                           # print the config file path
 tether --completions                      # write bash completions and show how to load them
@@ -46,11 +47,14 @@ tether info                               # configuration and status
 tether clean                              # remove the built image
 ```
 
-`tether run` and `tether shell` mount the current directory at `/workdir` in a
-fresh, disposable container (`docker run --rm`).
+`tether` with no subcommand behaves like `tether run`, including forwarded
+options (`tether --agent claude`). `tether run` and `tether shell` mount the
+current directory at `/workdir` in a fresh, disposable container
+(`docker run --rm`).
 
 ### Commands and options
 
+- With no subcommand, `tether` is equivalent to `tether run`.
 - `--completions` — write a bash completion script to
   `$XDG_DATA_HOME/bash-completion/completions/tether` (or
   `~/.local/share/bash-completion/completions/tether`) and print the path plus a

@@ -48,7 +48,25 @@ def _print_config(ctx: click.Context, param: click.Parameter, value: bool) -> No
     ctx.exit()
 
 
-@click.group(context_settings={"help_option_names": ["-h", "--help"]})
+_GLOBAL_OPTIONS = ("-h", "--help", "--version", "--config", "--completions")
+
+
+class _DefaultRunGroup(click.Group):
+    """Run ``tether run`` when no subcommand is given.
+
+    Arguments that are not subcommands are forwarded to ``run``, so
+    ``tether --agent claude`` behaves like ``tether run --agent claude``.
+    """
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        if not args:
+            args = ["run"]
+        elif args[0] not in (*self.commands, *_GLOBAL_OPTIONS):
+            args = ["run", *args]
+        return super().parse_args(ctx, args)
+
+
+@click.group(cls=_DefaultRunGroup, context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(version=__version__, prog_name="tether")
 @click.option(
     "--completions",
@@ -67,7 +85,10 @@ def _print_config(ctx: click.Context, param: click.Parameter, value: bool) -> No
     help="Print the config file path and exit.",
 )
 def main() -> None:
-    """Run AI coding harnesses in a disposable Docker container at /workdir."""
+    """Run AI coding harnesses in a disposable Docker container at /workdir.
+
+    With no subcommand, tether is equivalent to tether run.
+    """
 
 
 def _load_config():

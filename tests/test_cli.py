@@ -51,3 +51,49 @@ def test_build_rejects_removed_completion_flags() -> None:
 
     assert result.exit_code != 0
     assert "No such option" in result.output
+
+
+def _stub_run(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    config = Config(
+        path=tmp_path / "config.toml",
+        default_agent="opencode",
+        mounts={"opencode": [], "claude": [], "antigravity": []},
+    )
+    monkeypatch.setattr(cli, "_load_config", lambda: config)
+    monkeypatch.setattr(cli, "_require_docker", lambda: None)
+    monkeypatch.setattr(cli, "_require_image", lambda: None)
+    calls: list[list[str]] = []
+
+    def fake_run_container(
+        image: str,
+        workdir: Path,
+        mounts: list[tuple[str, str]],
+        command: list[str],
+    ) -> int:
+        calls.append(command)
+        return 0
+
+    monkeypatch.setattr(docker, "run_container", fake_run_container)
+    return calls
+
+
+def test_bare_invocation_runs_default_agent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _stub_run(tmp_path, monkeypatch)
+
+    result = CliRunner().invoke(main, [])
+
+    assert result.exit_code == 0
+    assert calls == [["opencode", "--auto"]]
+
+
+def test_bare_invocation_forwards_run_options(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _stub_run(tmp_path, monkeypatch)
+
+    result = CliRunner().invoke(main, ["--agent", "claude"])
+
+    assert result.exit_code == 0
+    assert calls == [["claude"]]
