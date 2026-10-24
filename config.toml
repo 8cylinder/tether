@@ -9,7 +9,8 @@
 default = "opencode"
 
 [opencode]
-# Arguments passed to the harness when it starts.
+# Arguments passed to the harness when it starts. tether always adds
+# --standalone so each container uses its own private OpenCode server.
 # Omit to use the harness default; use [] to pass none.
 # Default: ["--auto"]
 args = ["--auto"]

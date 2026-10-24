@@ -85,7 +85,7 @@ def test_bare_invocation_runs_default_agent(
     result = CliRunner().invoke(main, [])
 
     assert result.exit_code == 0
-    assert calls == [["opencode", "--auto"]]
+    assert calls == [["opencode", "--standalone", "--auto"]]
 
 
 def test_bare_invocation_forwards_run_options(

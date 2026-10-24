@@ -8,11 +8,11 @@ Source: <https://github.com/8cylinder/tether>
 
 Supported harnesses:
 
-| name          | command             | description            |
-| ------------- | ------------------- | ---------------------- |
-| `opencode`    | `opencode --auto`   | OpenCode               |
-| `claude`      | `claude`            | Anthropic Claude Code  |
-| `antigravity` | `agy`               | Google Antigravity     |
+| name          | command                        | description            |
+| ------------- | ------------------------------ | ---------------------- |
+| `opencode`    | `opencode --standalone --auto` | OpenCode               |
+| `claude`      | `claude`                       | Anthropic Claude Code  |
+| `antigravity` | `agy`                          | Google Antigravity     |
 
 ## Requirements
 
@@ -131,6 +131,11 @@ mount = [
 - `args` overrides the arguments passed to the harness; omit it to use the
   harness defaults (for example `--auto` for `opencode`). Set it to an empty
   list to pass none.
+- tether always runs `opencode` with `--standalone`, so each container gets a
+  private OpenCode server. The default background service is shared through
+  `~/.local/state/opencode/service.json`, which containers cannot reach across
+  their separate loopback networks, and concurrent instances would otherwise
+  keep replacing each other's registration.
 - `~` and environment variables are expanded.
 - Host paths under `$HOME` are mounted to the same path under the container
   user's home (`/home/tether`), so the harnesses find their settings.

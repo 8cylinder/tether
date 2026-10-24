@@ -19,7 +19,7 @@ class Harness:
 HARNESSES: dict[str, Harness] = {
     "opencode": Harness(
         name="opencode",
-        command=("opencode",),
+        command=("opencode", "--standalone"),
         description="OpenCode",
         default_args=("--auto",),
         default_mounts=(

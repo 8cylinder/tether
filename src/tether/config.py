@@ -32,7 +32,8 @@ CONFIG_TEMPLATE = """\
 # files are skipped.
 #
 # `args` sets the arguments passed to the harness when it starts. Omit it to
-# use the harness defaults.
+# use the harness defaults. tether always adds --standalone to opencode so each
+# container runs its own private server.
 
 default = "opencode"
 
