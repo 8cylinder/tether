@@ -1,4 +1,4 @@
-"""Loading and resolving ``~/.config/tether/config.toml``."""
+"""Loading and resolving the tether configuration file."""
 
 from __future__ import annotations
 
@@ -9,10 +9,18 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from platformdirs import user_config_dir
+
 from tether.harnesses import DEFAULT_AGENT, HARNESSES
 from tether.util import container_path_for, expand_host_path, looks_like_file
 
-CONFIG_PATH = Path.home() / ".config" / "tether" / "config.toml"
+APP_NAME = "tether"
+
+
+def config_path() -> Path:
+    """Return the platform's default config file path."""
+    return Path(user_config_dir(APP_NAME)) / "config.toml"
+
 
 CONFIG_TEMPLATE = """\
 # tether configuration
@@ -72,17 +80,17 @@ class Config:
 
 def load_config(path: Path | None = None, *, create: bool = True) -> Config:
     """Load the config file, creating it with defaults if it does not exist."""
-    config_path = Path(path) if path is not None else CONFIG_PATH
+    target = Path(path) if path is not None else config_path()
 
-    if config_path.exists():
+    if target.exists():
         try:
-            data = tomllib.loads(config_path.read_text(encoding="utf-8"))
+            data = tomllib.loads(target.read_text(encoding="utf-8"))
         except tomllib.TOMLDecodeError as exc:  # pragma: no cover - message passthrough
-            raise ConfigError(f"Invalid TOML in {config_path}: {exc}") from exc
+            raise ConfigError(f"Invalid TOML in {target}: {exc}") from exc
     else:
         if create:
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            config_path.write_text(CONFIG_TEMPLATE, encoding="utf-8")
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(CONFIG_TEMPLATE, encoding="utf-8")
         data = tomllib.loads(CONFIG_TEMPLATE)
 
     default_agent = data.get("default") or data.get("deafault") or DEFAULT_AGENT
@@ -108,7 +116,7 @@ def load_config(path: Path | None = None, *, create: bool = True) -> Config:
             args[name] = _string_list(raw_args, harness.default_args, name, "args")
 
     return Config(
-        path=config_path,
+        path=target,
         default_agent=default_agent,
         mounts=mounts,
         args=args,

@@ -6,14 +6,10 @@ import textwrap
 from pathlib import Path
 
 import click
+from rich.markup import escape
 
-from tether import __version__, docker
-from tether.completion import (
-    CompletionError,
-    completion_command,
-    global_completion_command,
-)
-from tether.config import ConfigError, load_config, resolve_mounts
+from tether import __version__, completion, docker, ui
+from tether.config import ConfigError, config_path, load_config, resolve_mounts
 from tether.docker import EXTRA_APPS
 from tether.harnesses import AGENT_CHOICES, HARNESSES
 from tether.util import (
@@ -25,8 +21,51 @@ from tether.util import (
 )
 
 
+def _write_completions(ctx: click.Context, param: click.Parameter, value: bool) -> None:
+    if not value or ctx.resilient_parsing:
+        return
+
+    try:
+        path = completion.write_bash_completion(main)
+    except OSError as exc:
+        raise click.ClickException(f"Could not write completion script: {exc}") from exc
+    console = ui.console()
+    console.print(f"[green]Wrote[/green] {escape(str(path))}")
+    console.print("To enable completions in the current terminal, run:")
+    console.print(f"  [cyan]source {escape(str(path))}[/cyan]")
+
+    warning = completion.completion_warning(completion.bash_version())
+    if warning:
+        ui.error_console().print(f"[yellow]warning:[/yellow] {escape(warning)}")
+    ctx.exit()
+
+
+def _print_config(ctx: click.Context, param: click.Parameter, value: bool) -> None:
+    if not value or ctx.resilient_parsing:
+        return
+
+    ui.console().print(str(config_path()), markup=False)
+    ctx.exit()
+
+
 @click.group(context_settings={"help_option_names": ["-h", "--help"]})
 @click.version_option(version=__version__, prog_name="tether")
+@click.option(
+    "--completions",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    callback=_write_completions,
+    help="Write bash completions to the XDG data directory and exit.",
+)
+@click.option(
+    "--config",
+    is_flag=True,
+    is_eager=True,
+    expose_value=False,
+    callback=_print_config,
+    help="Print the config file path and exit.",
+)
 def main() -> None:
     """Run AI coding harnesses in a disposable Docker container at /workdir."""
 
@@ -49,20 +88,19 @@ def _require_image() -> None:
 
 
 def _show_skipped(skipped: list[tuple[str, str]]) -> None:
+    if not skipped:
+        return
+    console = ui.error_console()
     for raw, reason in skipped:
-        click.echo(f"warning: skipping mount {raw} ({reason})", err=True)
-
-
-def _show_completion_command(command: str) -> None:
-    click.echo("Copy and paste the following command:")
-    click.secho(command, fg="cyan")
+        console.print(f"[yellow]warning:[/yellow] skipping mount {escape(raw)} ({escape(reason)})")
 
 
 def _show_mounts(workdir: Path, mounts: list[tuple[str, str]]) -> None:
-    click.echo("Mounts:")
-    click.echo(f"  {workdir} -> {CONTAINER_WORKDIR}")
+    console = ui.console()
+    console.print("[bold]Mounts:[/bold]")
+    console.print(f"  {escape(str(workdir))} -> {CONTAINER_WORKDIR}")
     for host, container in mounts:
-        click.echo(f"  {host} -> {container}")
+        console.print(f"  {escape(host)} -> {escape(container)}")
 
 
 @main.command()
@@ -88,16 +126,19 @@ def run(agent: str | None, workdir: Path | None) -> None:
     harness = HARNESSES[agent]
     host_workdir = (workdir or Path.cwd()).resolve()
 
-    mounts, skipped = resolve_mounts(config, agent)
+    mounted, skipped = resolve_mounts(config, agent)
     _show_skipped(skipped)
-    _show_mounts(host_workdir, mounts)
+    _show_mounts(host_workdir, mounted)
 
     command = [*harness.command, *config.args_for(agent)]
-    click.echo(f"Running {harness.description} in {host_workdir} (mounted at /workdir).")
+    ui.console().print(
+        f"Running [cyan]{escape(harness.description)}[/cyan] in "
+        f"{escape(str(host_workdir))} (mounted at /workdir)."
+    )
     code = docker.run_container(
         IMAGE_NAME,
         host_workdir,
-        mounts,
+        mounted,
         command,
     )
     raise SystemExit(code)
@@ -105,54 +146,18 @@ def run(agent: str | None, workdir: Path | None) -> None:
 
 @main.command()
 @click.option(
-    "--install-completion",
-    "install_completion_flag",
-    is_flag=True,
-    help="Print a command that enables shell completion for the current shell.",
-)
-@click.option(
-    "--install-global-completion",
-    "install_global_completion_flag",
-    is_flag=True,
-    help="Print a command that installs shell completion for all users.",
-)
-@click.option(
     "--update-software",
     is_flag=True,
     help="Ignore the build cache and pull the base image to upgrade all software.",
 )
-def build(
-    install_completion_flag: bool,
-    install_global_completion_flag: bool,
-    update_software: bool,
-) -> None:
+def build(update_software: bool) -> None:
     """Build (or rebuild) the container image."""
-    if install_completion_flag and install_global_completion_flag:
-        raise click.UsageError(
-            "--install-completion and --install-global-completion are mutually exclusive."
-        )
-
-    if install_completion_flag:
-        try:
-            command = completion_command()
-        except CompletionError as exc:
-            raise click.ClickException(str(exc)) from exc
-        _show_completion_command(command)
-        return
-
-    if install_global_completion_flag:
-        try:
-            command = global_completion_command()
-        except CompletionError as exc:
-            raise click.ClickException(str(exc)) from exc
-        _show_completion_command(command)
-        return
-
     _require_docker()
     uid, gid = host_uid_gid()
+    console = ui.console()
     if update_software:
-        click.echo("Updating all container software to the latest versions ...")
-    click.echo(f"Building {IMAGE_NAME} (UID={uid}, GID={gid}) ...")
+        console.print("Updating all container software to the latest versions ...")
+    console.print(f"Building {IMAGE_NAME} (UID={uid}, GID={gid}) ...")
     try:
         docker.build_image(
             IMAGE_NAME,
@@ -162,46 +167,58 @@ def build(
         )
     except docker.DockerError as exc:
         raise click.ClickException(str(exc)) from exc
-    click.echo(f"Built {IMAGE_NAME}.")
+    console.print(f"[green]Built[/green] {IMAGE_NAME}.")
 
 
 @main.command()
 def info() -> None:
     """Show configuration, mounts and container status."""
     config = _load_config()
+    console = ui.console()
 
-    click.echo(f"config:        {config.path}")
-    click.echo(f"default agent: {config.default_agent}")
+    console.print(f"[bold]config:[/bold]        {escape(str(config.path))}")
+    console.print(f"[bold]default agent:[/bold] {escape(config.default_agent)}")
 
     version = docker.docker_version()
-    click.echo(f"docker:        {version if version else 'not available'}")
     if version:
-        image_state = "present" if docker.image_exists() else "not built"
+        console.print(f"[bold]docker:[/bold]        [green]{escape(version)}[/green]")
     else:
-        image_state = "unknown (docker unavailable)"
-    click.echo(f"image:         {IMAGE_NAME} ({image_state})")
-    click.echo("container:     ephemeral (created per run, removed on exit)")
-    click.echo("")
-    click.echo("harnesses:")
+        console.print("[bold]docker:[/bold]        [red]not available[/red]")
+
+    if version and docker.image_exists():
+        image_state = "[green]present[/green]"
+    elif version:
+        image_state = "[yellow]not built[/yellow]"
+    else:
+        image_state = "[red]unknown, docker unavailable[/red]"
+    console.print(f"[bold]image:[/bold]         {IMAGE_NAME} ({image_state})")
+    console.print("[bold]container:[/bold]     ephemeral (created per run, removed on exit)")
+    console.print("")
+    console.print("[bold]harnesses:[/bold]")
 
     for name, harness in HARNESSES.items():
-        marker = "*" if name == config.default_agent else " "
+        marker = "[cyan]*[/cyan]" if name == config.default_agent else " "
         command = " ".join([*harness.command, *config.args_for(name)])
-        click.echo(f" {marker} {name:<12} {command:<8} {harness.description}")
+        console.print(f" {marker} {name:<12} {escape(command):<8} {escape(harness.description)}")
         for raw in config.raw_mounts_for(name):
             host = expand_host_path(raw)
-            status = "ok" if host.exists() else "missing"
-            click.echo(f"       [{status:^7}] {raw}  ->  {container_path_for(host)}")
+            label = "ok" if host.exists() else "missing"
+            color = "green" if host.exists() else "yellow"
+            console.print(
+                f"       [{color}]{label:^7}[/{color}] {escape(raw)}  ->  "
+                f"{escape(container_path_for(host))}"
+            )
 
-    click.echo("")
-    click.echo("extra installed apps:")
-    click.echo(
+    console.print("")
+    console.print("[bold]extra installed apps:[/bold]")
+    console.print(
         textwrap.fill(
             ", ".join(EXTRA_APPS),
             width=76,
             initial_indent="  ",
             subsequent_indent="  ",
-        )
+        ),
+        markup=False,
     )
 
 
@@ -219,11 +236,11 @@ def shell(workdir: Path | None) -> None:
 
     config = _load_config()
     host_workdir = (workdir or Path.cwd()).resolve()
-    mounts, skipped = resolve_mounts(config, config.default_agent)
+    mounted, skipped = resolve_mounts(config, config.default_agent)
     _show_skipped(skipped)
-    _show_mounts(host_workdir, mounts)
+    _show_mounts(host_workdir, mounted)
 
-    code = docker.run_container(IMAGE_NAME, host_workdir, mounts, ["bash"])
+    code = docker.run_container(IMAGE_NAME, host_workdir, mounted, ["bash"])
     raise SystemExit(code)
 
 
@@ -236,9 +253,9 @@ def clean() -> None:
     except docker.DockerError as exc:
         raise click.ClickException(str(exc)) from exc
     if removed:
-        click.echo(f"Removed {IMAGE_NAME}.")
+        ui.console().print(f"[green]Removed[/green] {IMAGE_NAME}.")
     else:
-        click.echo(f"Nothing to remove ({IMAGE_NAME} not found).")
+        ui.console().print(f"[yellow]Nothing to remove[/yellow] ({IMAGE_NAME} not found).")
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -8,4 +8,14 @@ build/
 .pytest_cache/
 .ruff_cache/
 .ty/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+.DS_Store
+.idea/
+.vscode/
 app-base.org

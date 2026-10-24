@@ -5,7 +5,26 @@ from pathlib import Path
 
 import pytest
 
+from tether import config
 from tether.config import Config, ConfigError, load_config, resolve_mounts
+
+
+def test_config_path_uses_platformdirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config, "user_config_dir", lambda app: str(tmp_path / app))
+
+    assert config.config_path() == tmp_path / "tether" / "config.toml"
+
+
+def test_load_config_defaults_to_platform_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "tether" / "config.toml"
+    monkeypatch.setattr(config, "config_path", lambda: path)
+
+    loaded = config.load_config()
+
+    assert loaded.path == path
+    assert path.exists()
 
 
 def test_creates_default_config_when_missing(tmp_path: Path) -> None:

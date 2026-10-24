@@ -1,6 +1,6 @@
 # Sample tether configuration.
 #
-# Copy this file to ~/.config/tether/config.toml and adjust as needed.
+# Copy this file to the path printed by `tether --config` and adjust as needed.
 # Every field is shown with its default value.
 
 # Harness used by `tether run` when --agent is omitted.

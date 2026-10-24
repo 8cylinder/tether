@@ -1,63 +1,69 @@
-"""Commands for enabling shell completion for ``tether``."""
+"""Generate bash completion for ``tether``."""
 
 from __future__ import annotations
 
 import os
-import shlex
+import re
+import shutil
+import subprocess
 from pathlib import Path
 
-SUPPORTED_SHELLS = ("bash", "zsh", "fish")
+from click import Command
+from click.shell_completion import BashComplete
 
-_COMPLETION_COMMAND = {
-    "bash": 'eval "$(_TETHER_COMPLETE=bash_source tether)"',
-    "zsh": 'eval "$(_TETHER_COMPLETE=zsh_source tether)"',
-    "fish": "_TETHER_COMPLETE=fish_source tether | source",
-}
-
-_STARTUP_FILE = {
-    "bash": "~/.bashrc",
-    "zsh": "~/.zshrc",
-    "fish": "~/.config/fish/config.fish",
-}
-
-_GLOBAL_COMPLETION_PATH = {
-    "bash": "/usr/share/bash-completion/completions/tether",
-    "zsh": "/usr/local/share/zsh/site-functions/_tether",
-    "fish": "/usr/share/fish/vendor_completions.d/tether.fish",
-}
+APP_NAME = "tether"
+MIN_BASH = (4, 4)
 
 
-class CompletionError(RuntimeError):
-    """Raised when shell completion cannot be configured."""
+def completion_path() -> Path:
+    """Return where the bash completion script should be written.
+
+    Uses ``$XDG_DATA_HOME/bash-completion/completions/tether`` and falls back
+    to ``~/.local/share/bash-completion/completions/tether`` when
+    ``XDG_DATA_HOME`` is unset.
+    """
+    data_home = os.environ.get("XDG_DATA_HOME")
+    base = Path(os.path.expanduser(data_home)) if data_home else Path.home() / ".local" / "share"
+    return base / "bash-completion" / "completions" / APP_NAME
 
 
-def detect_shell(shell: str | None = None) -> str:
-    """Return a supported shell name, detecting it from ``$SHELL`` if needed."""
-    if shell is None:
-        shell = os.environ.get("SHELL", "")
-    shell = Path(shell).name
-    if shell not in SUPPORTED_SHELLS:
-        supported = ", ".join(SUPPORTED_SHELLS)
-        raise CompletionError(
-            f"Could not detect a supported shell (got {shell or 'nothing'!r}). "
-            f"Supported shells: {supported}."
+def write_bash_completion(command: Command, path: Path | None = None) -> Path:
+    """Write the bash completion script for ``command`` and return its path."""
+    destination = Path(path) if path is not None else completion_path()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    script = BashComplete(command, {}, APP_NAME, "_TETHER_COMPLETE").source()
+    destination.write_text(script, encoding="utf-8")
+    return destination
+
+
+def bash_version() -> tuple[int, int] | None:
+    """Return the ``(major, minor)`` version of the bash on PATH, if any."""
+    executable = shutil.which("bash")
+    if executable is None:
+        return None
+    try:
+        result = subprocess.run(
+            [executable, "--version"],
+            capture_output=True,
+            text=True,
+            check=False,
         )
-    return shell
+    except OSError:
+        return None
+    match = re.search(r"version (\d+)\.(\d+)", result.stdout)
+    if match is None:
+        return None
+    return int(match.group(1)), int(match.group(2))
 
 
-def completion_command(shell: str | None = None) -> str:
-    """Return a command that appends completion setup to the shell startup file."""
-    shell = detect_shell(shell)
-    line = shlex.quote(_COMPLETION_COMMAND[shell])
-    path = _STARTUP_FILE[shell]
-    command = f"echo {line} >> {path}"
-    if shell == "fish":
-        return f"mkdir -p ~/.config/fish && {command}"
-    return command
-
-
-def global_completion_command(shell: str | None = None) -> str:
-    """Return commands that install completion for all users and load it now."""
-    shell = detect_shell(shell)
-    path = _GLOBAL_COMPLETION_PATH[shell]
-    return f"_TETHER_COMPLETE={shell}_source tether | sudo tee {path} >/dev/null\nsource {path}"
+def completion_warning(version: tuple[int, int] | None) -> str | None:
+    """Return a warning when bash cannot run the generated completion script."""
+    if version is None:
+        return "bash was not found on PATH; completions require bash 4.4 or newer."
+    if version < MIN_BASH:
+        major, minor = version
+        return (
+            f"bash {major}.{minor} is older than 4.4; "
+            "the completion script requires bash 4.4 or newer."
+        )
+    return None
