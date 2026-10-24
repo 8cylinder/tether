@@ -10,6 +10,38 @@ from pathlib import Path
 
 from tether.util import CONTAINER_WORKDIR, IMAGE_NAME
 
+# Command-line tools installed in the image on top of the base image. The AI
+# harnesses have their own section in ``tether info``.
+EXTRA_APPS: tuple[str, ...] = (
+    "bash",
+    "build-essential",
+    "ca-certificates",
+    "curl",
+    "fd-find",
+    "git",
+    "gnupg",
+    "jq",
+    "less",
+    "libsecret-1-0",
+    "make",
+    "nano",
+    "openssh-client",
+    "pipx",
+    "procps",
+    "python3",
+    "python3-pip",
+    "python3-venv",
+    "ripgrep",
+    "sudo",
+    "tmux",
+    "unzip",
+    "uv",
+    "vim",
+    "wget",
+    "zip",
+    "zsh",
+)
+
 
 class DockerError(RuntimeError):
     """Raised when a docker command fails."""

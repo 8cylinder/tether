@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import textwrap
 from pathlib import Path
 
 import click
@@ -13,6 +14,7 @@ from tether.completion import (
     global_completion_command,
 )
 from tether.config import ConfigError, load_config, resolve_mounts
+from tether.docker import EXTRA_APPS
 from tether.harnesses import AGENT_CHOICES, HARNESSES
 from tether.util import (
     CONTAINER_WORKDIR,
@@ -190,6 +192,17 @@ def info() -> None:
             host = expand_host_path(raw)
             status = "ok" if host.exists() else "missing"
             click.echo(f"       [{status:^7}] {raw}  ->  {container_path_for(host)}")
+
+    click.echo("")
+    click.echo("extra installed apps:")
+    click.echo(
+        textwrap.fill(
+            ", ".join(EXTRA_APPS),
+            width=76,
+            initial_indent="  ",
+            subsequent_indent="  ",
+        )
+    )
 
 
 @main.command()

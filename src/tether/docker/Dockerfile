@@ -7,6 +7,8 @@ ARG GID=1000
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Keep this package list in sync with EXTRA_APPS in src/tether/docker.py, which
+# `tether info` displays.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bash \
@@ -56,6 +58,9 @@ ENV PATH=/home/tether/.local/bin:${PATH}
 
 # Google Antigravity CLI (installs agy into ~/.local/bin).
 RUN curl -fsSL https://antigravity.google/cli/install.sh | bash
+
+# uv, the Python package and project manager (installs into ~/.local/bin).
+RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_NO_MODIFY_PATH=1 sh
 
 WORKDIR /workdir
 CMD ["bash"]
