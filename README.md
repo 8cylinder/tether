@@ -165,8 +165,9 @@ make check         # format check + lint + type + test
 - The harnesses are installed inside the image at build time; only their
   settings are taken from the host. Run `tether build --update-software` to
   bypass the build cache and pull the latest base image and tool versions.
-- The image also includes common command-line tools, including [`uv`](https://docs.astral.sh/uv/).
-  Run `tether info` to list them.
+- The image also includes common command-line tools, including
+  [`uv`](https://docs.astral.sh/uv/) and the
+  [GitHub CLI](https://cli.github.com/). Run `tether info` to list them.
 - The image is built with your host UID/GID so files created in `/workdir` stay
   owned by you.
 - OAuth sign-in may not work inside a container without a browser. Prefer

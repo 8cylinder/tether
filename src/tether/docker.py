@@ -18,6 +18,7 @@ EXTRA_APPS: tuple[str, ...] = (
     "ca-certificates",
     "curl",
     "fd-find",
+    "gh",
     "git",
     "gnupg",
     "jq",
