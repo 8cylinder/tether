@@ -4,7 +4,8 @@ version = "0.3.0"
 description = "Run AI coding harnesses in a disposable Docker container."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
+license = "GPL-2.0-only"
+license-files = ["LICENSE"]
 authors = [{ name = "tether contributors" }]
 dependencies = [
     "click>=8.5",
@@ -12,11 +13,26 @@ dependencies = [
     "rich>=13",
 ]
 
+[project.urls]
+Homepage = "https://8cylinder.github.io/tether/"
+Repository = "https://github.com/8cylinder/tether"
+Issues = "https://github.com/8cylinder/tether/issues"
+
 [project.scripts]
 tether = "tether.cli:main"
 
 [dependency-groups]
-dev = ["ruff>=0.6", "ty>=0.0.1a1", "pytest>=8.0"]
+dev = [
+    "furo",
+    "myst-parser",
+    "pytest>=8.0",
+    "pytest-cov>=6",
+    "ruff>=0.6",
+    "sphinx>=9",
+    "sphinx-autobuild",
+    "sphinx-click>=6",
+    "ty>=0.0.1a1",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -26,13 +42,28 @@ build-backend = "hatchling.build"
 packages = ["src/tether"]
 
 [tool.ruff]
-line-length = 100
+line-length = 80
 target-version = "py311"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
+extend-select = ["ANN", "PGH003", "PYI"]
+
+[tool.ty.rules]
+dynamic-function-decorator-return = "error"
+missing-type-argument = "error"
+possibly-unresolved-reference = "warn"
+unsound-return-statement = "error"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-ra --strict-markers --strict-config --cov=tether --cov-branch --cov-report=term-missing"
+
+[tool.coverage.run]
+branch = true
+source = ["tether"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true

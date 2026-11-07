@@ -4,5 +4,8 @@ from importlib.metadata import PackageNotFoundError, version
 
 try:
     __version__ = version("tether")
-except PackageNotFoundError:
-    __version__ = "0.0.0"
+except PackageNotFoundError as exc:  # pragma: no cover - installation problem
+    raise RuntimeError(
+        "tether is not installed. Install it with `uv sync` or "
+        "`pip install -e .` before running it."
+    ) from exc

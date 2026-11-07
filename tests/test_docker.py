@@ -46,7 +46,9 @@ def test_build_image(recorder: Recorder) -> None:
 
 
 def test_build_image_update_software(recorder: Recorder) -> None:
-    docker.build_image("tether:latest", uid=1001, gid=1002, update_software=True)
+    docker.build_image(
+        "tether:latest", uid=1001, gid=1002, update_software=True
+    )
 
     command = recorder.commands[0]
     assert "--no-cache" in command

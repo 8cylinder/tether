@@ -1,21 +1,36 @@
+# Python
 __pycache__/
 *.py[cod]
-.venv/
-.uv/
-dist/
-build/
 *.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# Tool caches
 .pytest_cache/
 .ruff_cache/
 .ty/
+.ty_cache/
 .mypy_cache/
 .coverage
 .coverage.*
 coverage.xml
 htmlcov/
-.tox/
-.nox/
-.DS_Store
-.idea/
+
+# Sphinx
+docs/_build/
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Editors and OS
 .vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Local project notes
 app-base.org

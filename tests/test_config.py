@@ -9,8 +9,12 @@ from tether import config
 from tether.config import Config, ConfigError, load_config, resolve_mounts
 
 
-def test_config_path_uses_platformdirs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(config, "user_config_dir", lambda app: str(tmp_path / app))
+def test_config_path_uses_platformdirs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        config, "user_config_dir", lambda app: str(tmp_path / app)
+    )
 
     assert config.config_path() == tmp_path / "tether" / "config.toml"
 
@@ -25,16 +29,17 @@ def test_load_config_defaults_to_platform_path(
 
     assert loaded.path == path
     assert path.exists()
+    assert path.stat().st_mode & 0o777 == 0o600
 
 
 def test_creates_default_config_when_missing(tmp_path: Path) -> None:
     path = tmp_path / "tether" / "config.toml"
-    config = load_config(path)
+    loaded = load_config(path)
 
     assert path.exists()
-    assert config.default_agent == "opencode"
-    assert config.raw_mounts_for("opencode")
-    assert config.args_for("opencode") == ["--auto"]
+    assert loaded.default_agent == "opencode"
+    assert loaded.raw_mounts_for("opencode")
+    assert loaded.args_for("opencode") == ["--auto"]
 
 
 def test_does_not_create_when_disabled(tmp_path: Path) -> None:
@@ -49,32 +54,36 @@ def test_parses_custom_mounts(tmp_path: Path) -> None:
         'default = "claude"\n[claude]\nmount = ["/tmp/one", "/tmp/two"]\n',
         encoding="utf-8",
     )
-    config = load_config(path)
+    loaded = load_config(path)
 
-    assert config.default_agent == "claude"
-    assert config.raw_mounts_for("claude") == ["/tmp/one", "/tmp/two"]
-    assert config.raw_mounts_for("opencode")
+    assert loaded.default_agent == "claude"
+    assert loaded.raw_mounts_for("claude") == ["/tmp/one", "/tmp/two"]
+    assert loaded.raw_mounts_for("opencode")
 
 
 def test_parses_custom_args(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
     path.write_text(
-        'default = "claude"\n[claude]\nargs = ["--verbose", "--model", "opus"]\n',
+        'default = "claude"\n[claude]\n'
+        'args = ["--verbose", "--model", "opus"]\n',
         encoding="utf-8",
     )
-    config = load_config(path)
+    loaded = load_config(path)
 
-    assert config.args_for("claude") == ["--verbose", "--model", "opus"]
-
-    assert config.args_for("opencode") == ["--auto"]
+    assert loaded.args_for("claude") == [
+        "--verbose",
+        "--model",
+        "opus",
+    ]
+    assert loaded.args_for("opencode") == ["--auto"]
 
 
 def test_allows_empty_args(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
     path.write_text("[opencode]\nargs = []\n", encoding="utf-8")
-    config = load_config(path)
+    loaded = load_config(path)
 
-    assert config.args_for("opencode") == []
+    assert loaded.args_for("opencode") == []
 
 
 def test_invalid_args_raises(tmp_path: Path) -> None:
@@ -87,8 +96,8 @@ def test_invalid_args_raises(tmp_path: Path) -> None:
 def test_accepts_deafault_typo(tmp_path: Path) -> None:
     path = tmp_path / "config.toml"
     path.write_text('deafault = "antigravity"\n', encoding="utf-8")
-    config = load_config(path)
-    assert config.default_agent == "antigravity"
+    loaded = load_config(path)
+    assert loaded.default_agent == "antigravity"
 
 
 def test_unknown_default_falls_back(tmp_path: Path) -> None:
@@ -96,9 +105,17 @@ def test_unknown_default_falls_back(tmp_path: Path) -> None:
     path.write_text('default = "nope"\n', encoding="utf-8")
     with warnings.catch_warnings(record=True) as caught:
         warnings.simplefilter("always")
-        config = load_config(path)
-    assert config.default_agent == "opencode"
+        loaded = load_config(path)
+    assert loaded.default_agent == "opencode"
     assert caught
+
+
+def test_default_must_be_string(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("default = 3\n", encoding="utf-8")
+
+    with pytest.raises(ConfigError):
+        load_config(path)
 
 
 def test_invalid_mount_raises(tmp_path: Path) -> None:
@@ -108,17 +125,85 @@ def test_invalid_mount_raises(tmp_path: Path) -> None:
         load_config(path)
 
 
-def test_resolve_mounts_maps_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_section_must_be_table(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text('claude = "nope"\n', encoding="utf-8")
+
+    with pytest.raises(ConfigError):
+        load_config(path)
+
+
+def test_invalid_toml_names_path(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[bad", encoding="utf-8")
+
+    with pytest.raises(ConfigError) as caught:
+        load_config(path)
+
+    assert str(path) in str(caught.value)
+
+
+def test_unknown_top_level_key_warns(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text('colour = "red"\n', encoding="utf-8")
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        load_config(path)
+
+    assert any("colour" in str(item.message) for item in caught)
+
+
+def test_unknown_section_key_warns(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text('[claude]\ncolour = "red"\n', encoding="utf-8")
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        load_config(path)
+
+    assert any("[claude]" in str(item.message) for item in caught)
+
+
+def test_relative_mounts_resolve_against_config_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    config_dir = tmp_path / "home" / ".config" / "tether"
+    config_dir.mkdir(parents=True)
+    path = config_dir / "config.toml"
+    path.write_text('[opencode]\nmount = ["relative"]\n', encoding="utf-8")
+    loaded = load_config(path)
+
+    mounts, skipped = resolve_mounts(loaded, "opencode")
+
+    assert skipped == []
+    assert mounts == [
+        (
+            str(config_dir / "relative"),
+            "/home/tether/.config/tether/relative",
+        )
+    ]
+
+
+def test_resolve_mounts_maps_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
     config_dir = tmp_path / ".config" / "opencode"
     config_dir.mkdir(parents=True)
 
-    config = Config(
+    loaded = Config(
         path=tmp_path / "config.toml",
         default_agent="opencode",
-        mounts={"opencode": ["~/.config/opencode", "~/.missing-file.json"]},
+        mounts={
+            "opencode": [
+                "~/.config/opencode",
+                "~/.missing-file.json",
+            ]
+        },
     )
-    mounts, skipped = resolve_mounts(config, "opencode")
+    mounts, skipped = resolve_mounts(loaded, "opencode")
 
     assert mounts == [(str(config_dir), "/home/tether/.config/opencode")]
     assert skipped == [("~/.missing-file.json", "file does not exist")]
@@ -128,26 +213,28 @@ def test_resolve_mounts_creates_missing_dirs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    config = Config(
+    loaded = Config(
         path=tmp_path / "config.toml",
         default_agent="claude",
         mounts={"claude": ["~/.claude"]},
     )
-    mounts, skipped = resolve_mounts(config, "claude")
+    mounts, skipped = resolve_mounts(loaded, "claude")
 
     assert skipped == []
     assert (tmp_path / ".claude").is_dir()
     assert mounts == [(str(tmp_path / ".claude"), "/home/tether/.claude")]
 
 
-def test_resolve_mounts_no_create(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_resolve_mounts_no_create(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
-    config = Config(
+    loaded = Config(
         path=tmp_path / "config.toml",
         default_agent="claude",
         mounts={"claude": ["~/.claude"]},
     )
-    mounts, skipped = resolve_mounts(config, "claude", create_missing=False)
+    mounts, skipped = resolve_mounts(loaded, "claude", create_missing=False)
 
     assert mounts == []
     assert skipped == [("~/.claude", "does not exist")]
@@ -171,8 +258,8 @@ def test_resolve_mounts_uses_logical_path_for_symlinked_dir(
     logical.parent.mkdir(parents=True)
     logical.symlink_to(real_dir)
 
-    config = _opencode_config(tmp_path, ["~/.config/opencode"])
-    mounts, skipped = resolve_mounts(config, "opencode")
+    loaded = _opencode_config(tmp_path, ["~/.config/opencode"])
+    mounts, skipped = resolve_mounts(loaded, "opencode")
 
     assert mounts == [(str(real_dir), "/home/tether/.config/opencode")]
     assert skipped == []
@@ -189,10 +276,13 @@ def test_resolve_mounts_mounts_absolute_file_symlink(
     config_dir.mkdir(parents=True)
     (config_dir / "opencode.jsonc").symlink_to(target)
 
-    config = _opencode_config(tmp_path, ["~/.config/opencode"])
-    mounts, skipped = resolve_mounts(config, "opencode")
+    loaded = _opencode_config(tmp_path, ["~/.config/opencode"])
+    mounts, skipped = resolve_mounts(loaded, "opencode")
 
-    assert (str(config_dir), "/home/tether/.config/opencode") in mounts
+    assert (
+        str(config_dir),
+        "/home/tether/.config/opencode",
+    ) in mounts
     assert (str(target), str(target)) in mounts
     assert skipped == []
 
@@ -209,10 +299,13 @@ def test_resolve_mounts_mounts_relative_outward_symlink(
     config_dir.mkdir(parents=True)
     (config_dir / "opencode.jsonc").symlink_to("../../shared/models.jsonc")
 
-    config = _opencode_config(tmp_path, ["~/.config/opencode"])
-    mounts, skipped = resolve_mounts(config, "opencode")
+    loaded = _opencode_config(tmp_path, ["~/.config/opencode"])
+    mounts, skipped = resolve_mounts(loaded, "opencode")
 
-    assert (str(target), "/home/tether/shared/models.jsonc") in mounts
+    assert (
+        str(target),
+        "/home/tether/shared/models.jsonc",
+    ) in mounts
     assert skipped == []
 
 
@@ -225,8 +318,8 @@ def test_resolve_mounts_skips_internal_symlink(
     (config_dir / "real.jsonc").write_text("{}", encoding="utf-8")
     (config_dir / "link.jsonc").symlink_to("real.jsonc")
 
-    config = _opencode_config(tmp_path, ["~/.config/opencode"])
-    mounts, skipped = resolve_mounts(config, "opencode")
+    loaded = _opencode_config(tmp_path, ["~/.config/opencode"])
+    mounts, skipped = resolve_mounts(loaded, "opencode")
 
     assert mounts == [(str(config_dir), "/home/tether/.config/opencode")]
     assert skipped == []
@@ -242,8 +335,11 @@ def test_resolve_mounts_reports_broken_symlinks(
     missing = tmp_path / ".config" / "missing"
     missing.symlink_to(missing.parent / "nope")
 
-    config = _opencode_config(tmp_path, ["~/.config/opencode", "~/.config/missing"])
-    mounts, skipped = resolve_mounts(config, "opencode")
+    loaded = _opencode_config(
+        tmp_path,
+        ["~/.config/opencode", "~/.config/missing"],
+    )
+    mounts, skipped = resolve_mounts(loaded, "opencode")
 
     assert mounts == [(str(config_dir), "/home/tether/.config/opencode")]
     assert skipped == [

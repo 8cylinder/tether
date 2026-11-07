@@ -115,7 +115,9 @@ def build_image(
         ]
         result = subprocess.run(command, check=False)
         if result.returncode != 0:
-            raise DockerError(f"docker build failed with exit code {result.returncode}")
+            raise DockerError(
+                f"docker build failed with exit code {result.returncode}"
+            )
 
 
 def run_container(
@@ -124,7 +126,8 @@ def run_container(
     mounts: list[tuple[str, str]],
     command: list[str],
 ) -> int:
-    """Run a one-off interactive container with the project and mounts attached."""
+    """Run a one-off interactive container with the project and mounts
+    attached."""
     args = [
         "docker",
         "run",

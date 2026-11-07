@@ -12,16 +12,21 @@ CONTAINER_USER = "tether"
 IMAGE_NAME = "tether:latest"
 
 
-def expand_host_path(raw: str) -> Path:
-    """Expand ``~`` and environment variables into a normalized absolute path.
+def expand_host_path(raw: str, base: Path | None = None) -> Path:
+    """Expand ``~`` and environment variables into an absolute path.
 
+    Relative paths are resolved against ``base`` (the config file's directory
+    for paths read from config) instead of the current working directory.
     Symlinks are deliberately *not* resolved here. The logical path is used to
     decide where the mount lands in the container, while the bind source is
     resolved separately (see :func:`tether.config.resolve_mounts`). Resolving
     both would move a symlinked mount to the wrong container path.
     """
     expanded = os.path.expanduser(os.path.expandvars(raw))
-    return Path(os.path.abspath(expanded))
+    path = Path(expanded)
+    if not path.is_absolute():
+        path = (base if base is not None else Path.cwd()) / path
+    return Path(os.path.abspath(path))
 
 
 def looks_like_file(path: Path) -> bool:
@@ -33,7 +38,7 @@ def looks_like_file(path: Path) -> bool:
 
 
 def container_path_for(host_path: Path, host_home: Path | None = None) -> str:
-    """Map a host path into the container, keeping paths under ``$HOME`` parallel."""
+    """Map a host path into the container, keeping ``$HOME`` paths parallel."""
     host_home = host_home or Path.home()
     try:
         relative = host_path.relative_to(host_home)

@@ -15,6 +15,8 @@ from tether.harnesses import DEFAULT_AGENT, HARNESSES
 from tether.util import container_path_for, expand_host_path, looks_like_file
 
 APP_NAME = "tether"
+KNOWN_TOP_LEVEL = {"default", "deafault", *HARNESSES}
+KNOWN_SECTION_KEYS = {"args", "mount"}
 
 
 def config_path() -> Path:
@@ -85,19 +87,26 @@ def load_config(path: Path | None = None, *, create: bool = True) -> Config:
 
     if target.exists():
         try:
-            data = tomllib.loads(target.read_text(encoding="utf-8"))
-        except tomllib.TOMLDecodeError as exc:  # pragma: no cover - message passthrough
+            with target.open("rb") as handle:
+                data = tomllib.load(handle)
+        except tomllib.TOMLDecodeError as exc:
             raise ConfigError(f"Invalid TOML in {target}: {exc}") from exc
     else:
         if create:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(CONFIG_TEMPLATE, encoding="utf-8")
+            target.chmod(0o600)
         data = tomllib.loads(CONFIG_TEMPLATE)
 
+    _warn_unknown_keys(data, target)
+
     default_agent = data.get("default") or data.get("deafault") or DEFAULT_AGENT
+    if not isinstance(default_agent, str):
+        raise ConfigError("[default] must be a string.")
     if default_agent not in HARNESSES:
         warnings.warn(
-            f"Unknown default harness {default_agent!r}; falling back to {DEFAULT_AGENT!r}.",
+            f"Unknown default harness {default_agent!r}; falling back to "
+            f"{DEFAULT_AGENT!r}.",
             stacklevel=2,
         )
         default_agent = DEFAULT_AGENT
@@ -111,10 +120,14 @@ def load_config(path: Path | None = None, *, create: bool = True) -> Config:
             continue
         if not isinstance(section, dict):
             raise ConfigError(f"Section [{name}] must be a table.")
-        mounts[name] = _string_list(section.get("mount"), harness.default_mounts, name, "mount")
+        mounts[name] = _string_list(
+            section.get("mount"), harness.default_mounts, name, "mount"
+        )
         raw_args = section.get("args")
         if raw_args is not None:
-            args[name] = _string_list(raw_args, harness.default_args, name, "args")
+            args[name] = _string_list(
+                raw_args, harness.default_args, name, "args"
+            )
 
     return Config(
         path=target,
@@ -124,10 +137,33 @@ def load_config(path: Path | None = None, *, create: bool = True) -> Config:
     )
 
 
-def _string_list(value: object, default: tuple[str, ...], agent: str, key: str) -> list[str]:
+def _warn_unknown_keys(data: dict[str, object], path: Path) -> None:
+    for key in data:
+        if key not in KNOWN_TOP_LEVEL:
+            warnings.warn(
+                f"Unknown key {key!r} in {path}; ignoring it.",
+                stacklevel=3,
+            )
+    for name in HARNESSES:
+        section = data.get(name)
+        if not isinstance(section, dict):
+            continue
+        for key in section:
+            if key not in KNOWN_SECTION_KEYS:
+                warnings.warn(
+                    f"Unknown key {key!r} in [{name}] in {path}; ignoring it.",
+                    stacklevel=3,
+                )
+
+
+def _string_list(
+    value: object, default: tuple[str, ...], agent: str, key: str
+) -> list[str]:
     if value is None:
         return list(default)
-    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) for item in value
+    ):
         raise ConfigError(f"[{agent}].{key} must be a list of strings.")
     return list(value)
 
@@ -156,6 +192,7 @@ def resolve_mounts(
     skipped: list[tuple[str, str]] = []
     seen_hosts: set[str] = set()
     seen_containers: set[str] = set()
+    base = config.path.parent
 
     def add(host: Path, container: str) -> None:
         host_str = str(host)
@@ -166,7 +203,7 @@ def resolve_mounts(
         mounts.append((host_str, container))
 
     for raw in config.raw_mounts_for(agent):
-        logical = expand_host_path(raw)
+        logical = expand_host_path(raw, base)
 
         if logical.is_symlink() and not logical.exists():
             skipped.append((raw, "broken symlink"))
@@ -232,6 +269,8 @@ def _add_symlink_mounts(
             destination = os.path.normpath(link)
         else:
             container_entry = Path(container_dir) / entry.name
-            destination = os.path.normpath(os.path.join(container_entry.parent, link))
+            destination = os.path.normpath(
+                os.path.join(container_entry.parent, link)
+            )
 
         add(target, destination)
