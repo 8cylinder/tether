@@ -6,10 +6,14 @@ being able to damage your host outside the mounted project directory.
 
 [![CI](https://github.com/8cylinder/tether/actions/workflows/ci.yml/badge.svg)](
     https://github.com/8cylinder/tether/actions/workflows/ci.yml)
+[![Docs](https://img.shields.io/badge/docs-online-blue.svg)](
+    https://8cylinder.github.io/tether/)
 [![License: GPL-2.0-only](https://img.shields.io/badge/license-GPL--2.0--only-blue.svg)](
     https://github.com/8cylinder/tether/blob/main/LICENSE)
 
 Source: <https://github.com/8cylinder/tether>
+
+Documentation: <https://8cylinder.github.io/tether/>
 
 ## Supported harnesses
 
