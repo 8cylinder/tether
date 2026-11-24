@@ -40,6 +40,7 @@ def test_creates_default_config_when_missing(tmp_path: Path) -> None:
     assert loaded.default_agent == "opencode"
     assert loaded.raw_mounts_for("opencode")
     assert loaded.args_for("opencode") == ["--auto"]
+    assert loaded.docker_args == []
 
 
 def test_does_not_create_when_disabled(tmp_path: Path) -> None:
@@ -91,6 +92,58 @@ def test_invalid_args_raises(tmp_path: Path) -> None:
     path.write_text('[claude]\nargs = "--verbose"\n', encoding="utf-8")
     with pytest.raises(ConfigError):
         load_config(path)
+
+
+def test_parses_docker_extra_args(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        "[docker]\n"
+        'extra_args = ["--add-host=host.docker.internal:host-gateway"]\n',
+        encoding="utf-8",
+    )
+    loaded = load_config(path)
+
+    assert loaded.docker_args == [
+        "--add-host=host.docker.internal:host-gateway"
+    ]
+
+
+def test_allows_empty_docker_extra_args(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text("[docker]\nextra_args = []\n", encoding="utf-8")
+    loaded = load_config(path)
+
+    assert loaded.docker_args == []
+
+
+def test_invalid_docker_extra_args_raises(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(
+        '[docker]\nextra_args = "--add-host=x:host-gateway"\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(ConfigError):
+        load_config(path)
+
+
+def test_docker_section_must_be_table(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text('docker = "nope"\n', encoding="utf-8")
+
+    with pytest.raises(ConfigError):
+        load_config(path)
+
+
+def test_unknown_docker_key_warns(tmp_path: Path) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text('[docker]\nnetwork = "host"\n', encoding="utf-8")
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        loaded = load_config(path)
+
+    assert loaded.docker_args == []
+    assert any("[docker]" in str(item.message) for item in caught)
 
 
 def test_accepts_deafault_typo(tmp_path: Path) -> None:

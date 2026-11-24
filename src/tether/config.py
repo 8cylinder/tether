@@ -15,8 +15,9 @@ from tether.harnesses import DEFAULT_AGENT, HARNESSES
 from tether.util import container_path_for, expand_host_path, looks_like_file
 
 APP_NAME = "tether"
-KNOWN_TOP_LEVEL = {"default", "deafault", *HARNESSES}
+KNOWN_TOP_LEVEL = {"default", "deafault", "docker", *HARNESSES}
 KNOWN_SECTION_KEYS = {"args", "mount"}
+KNOWN_DOCKER_KEYS = {"extra_args"}
 
 
 def config_path() -> Path:
@@ -38,6 +39,13 @@ CONFIG_TEMPLATE = """\
 # container runs its own private server.
 
 default = "opencode"
+
+[docker]
+# Extra arguments passed to `docker run` before the image name, for every
+# harness. For example, make the host reachable from the container so it can
+# use a host-run Ollama server:
+# extra_args = ["--add-host=host.docker.internal:host-gateway"]
+extra_args = []
 
 [opencode]
 args = ["--auto"]
@@ -73,6 +81,7 @@ class Config:
     default_agent: str
     mounts: dict[str, list[str]]
     args: dict[str, list[str]] = field(default_factory=dict)
+    docker_args: list[str] = field(default_factory=list)
 
     def raw_mounts_for(self, agent: str) -> list[str]:
         return list(self.mounts.get(agent, HARNESSES[agent].default_mounts))
@@ -129,11 +138,19 @@ def load_config(path: Path | None = None, *, create: bool = True) -> Config:
                 raw_args, harness.default_args, name, "args"
             )
 
+    docker_section = data.get("docker", {})
+    if not isinstance(docker_section, dict):
+        raise ConfigError("[docker] must be a table.")
+    docker_args = _string_list(
+        docker_section.get("extra_args"), (), "docker", "extra_args"
+    )
+
     return Config(
         path=target,
         default_agent=default_agent,
         mounts=mounts,
         args=args,
+        docker_args=docker_args,
     )
 
 
@@ -152,6 +169,14 @@ def _warn_unknown_keys(data: dict[str, object], path: Path) -> None:
             if key not in KNOWN_SECTION_KEYS:
                 warnings.warn(
                     f"Unknown key {key!r} in [{name}] in {path}; ignoring it.",
+                    stacklevel=3,
+                )
+    docker_section = data.get("docker")
+    if isinstance(docker_section, dict):
+        for key in docker_section:
+            if key not in KNOWN_DOCKER_KEYS:
+                warnings.warn(
+                    f"Unknown key {key!r} in [docker] in {path}; ignoring it.",
                     stacklevel=3,
                 )
 

@@ -79,6 +79,21 @@ def test_run_container(recorder: Recorder, tmp_path: Path) -> None:
     assert command[-2:] == ["tether:latest", "opencode"]
 
 
+def test_run_container_extra_args(recorder: Recorder, tmp_path: Path) -> None:
+    extra = "--add-host=host.docker.internal:host-gateway"
+    docker.run_container(
+        "tether:latest",
+        tmp_path,
+        [],
+        ["bash"],
+        extra_args=[extra],
+    )
+
+    command = recorder.commands[0]
+    assert extra in command
+    assert command.index(extra) < command.index("tether:latest")
+
+
 def test_remove_image(recorder: Recorder) -> None:
     assert docker.remove_image("tether:latest") is True
     assert recorder.commands[-1][:3] == ["docker", "image", "rm"]

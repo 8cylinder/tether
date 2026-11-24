@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Sequence
 from importlib import resources
 from pathlib import Path
 
@@ -125,9 +126,15 @@ def run_container(
     workdir: Path,
     mounts: list[tuple[str, str]],
     command: list[str],
+    *,
+    extra_args: Sequence[str] = (),
 ) -> int:
     """Run a one-off interactive container with the project and mounts
-    attached."""
+    attached.
+
+    ``extra_args`` are inserted before the image name so callers can pass
+    additional ``docker run`` flags without changing the base invocation.
+    """
     args = [
         "docker",
         "run",
@@ -145,6 +152,7 @@ def run_container(
     ]
     for host, container in mounts:
         args += ["--volume", f"{host}:{container}"]
+    args += list(extra_args)
     args.append(image)
     args += command
 

@@ -78,6 +78,7 @@ appear before the subcommand.
 | `tether build [--update-software]` | Build or rebuild the container image. `--update-software` bypasses the build cache and pulls the latest base image and tools. |
 | `tether shell [--workdir DIR]` | Open an interactive bash shell in the container at `/workdir`. |
 | `tether info` | Show the config path, default harness, Docker and image status, harness mounts, and bundled tools. |
+| `tether local ollama` | Check a host Ollama server and print the commands needed to make it available to the container. Exits non-zero when something still needs fixing. |
 | `tether clean` | Force-remove the tether image. |
 
 ### Global options
@@ -106,6 +107,9 @@ defaults and is created with mode `0600` on the first command that needs it.
 
 ```toml
 default = "opencode"
+
+[docker]
+extra_args = []
 
 [opencode]
 args = ["--auto"]
@@ -136,6 +140,18 @@ mount = [
   list to pass none.
 - `mount` lists host paths bind-mounted into the container so settings, prompts,
   and history carry over between sessions.
+- `[docker].extra_args` lists additional flags passed to `docker run` before
+  the image name, for every harness. Use it to reach services running on the
+  host, for example a host Ollama server on Linux:
+
+  ```toml
+  [docker]
+  extra_args = ["--add-host=host.docker.internal:host-gateway"]
+  ```
+
+  Point OpenCode at `http://host.docker.internal:11434/v1` and make Ollama
+  listen beyond loopback (for example with `OLLAMA_HOST=0.0.0.0:11434`); the
+  default `127.0.0.1` is unreachable from the container.
 - tether always runs `opencode` with `--standalone`, so each container gets a
   private OpenCode server. The default background service is shared through
   `~/.local/state/opencode/service.json`, which containers cannot reach across
@@ -152,6 +168,52 @@ mount = [
   are reported and skipped.
 - Unknown config keys produce a warning to stderr and are ignored.
 - Precedence is command-line option, then config value, then code default.
+
+## Local model servers
+
+`tether local` checks services running on the host that the container can use.
+
+```bash
+tether local ollama
+```
+
+It inspects the host Ollama server (reachability, installed models, context
+length), the tether container access settings, and prints the commands or
+config snippets needed for anything that is missing. The command only reads
+state; it never applies changes. It exits non-zero while something still needs
+fixing, so it can be used in setup scripts.
+
+To make a host Ollama server available to the container:
+
+1. Let Ollama listen beyond loopback and give it enough context for OpenCode:
+
+   ```ini
+   [Service]
+   Environment="OLLAMA_HOST=0.0.0.0:11434"
+   Environment="OLLAMA_CONTEXT_LENGTH=32768"
+   ```
+
+   Add these to `systemctl edit ollama`, then run
+   `sudo systemctl daemon-reload && sudo systemctl restart ollama`.
+
+2. Map the host into the container in `config.toml`:
+
+   ```toml
+   [docker]
+   extra_args = ["--add-host=host.docker.internal:host-gateway"]
+   ```
+
+3. Point OpenCode at it from `~/.config/opencode/opencode.jsonc`:
+
+   ```jsonc
+   "providers": {
+     "ollama": {
+       "settings": { "baseURL": "http://host.docker.internal:11434/v1" }
+     }
+   }
+   ```
+
+Then run `tether run`, open `/models`, and choose an `ollama/` model.
 
 ## Bash completions
 

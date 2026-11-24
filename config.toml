@@ -8,6 +8,13 @@
 # Valid values: "opencode", "claude", "antigravity"
 default = "opencode"
 
+[docker]
+# Extra arguments passed to `docker run` before the image name, for every
+# harness. For example, make the host reachable from the container so it can
+# use a host-run Ollama server.
+# Default: []
+extra_args = []
+
 [opencode]
 # Arguments passed to the harness when it starts. tether always adds
 # --standalone so each container uses its own private OpenCode server.

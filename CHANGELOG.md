@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here.
 
+## Unreleased
+
+- Add a `[docker]` configuration section with `extra_args`, which passes
+  additional flags to `docker run` for every harness. This lets `tether run`
+  and `tether shell` reach services on the host, such as a host-run Ollama
+  server via `--add-host=host.docker.internal:host-gateway`.
+- Add `tether local ollama`, which checks a host Ollama server and prints the
+  commands needed to expose it to the container.
+
 ## 0.3.0
 
 - Run OpenCode, Claude Code, or Google Antigravity in a disposable Docker

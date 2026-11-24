@@ -11,7 +11,7 @@ import click
 from rich.console import Console
 from rich.markup import escape
 
-from tether import __version__, completions, docker, ui
+from tether import __version__, completions, docker, local, ui
 from tether.config import (
     Config,
     ConfigError,
@@ -252,6 +252,7 @@ def run(obj: AppContext, agent: str | None, workdir: Path | None) -> None:
         host_workdir,
         mounted,
         command,
+        extra_args=config.docker_args,
     )
     raise SystemExit(code)
 
@@ -368,7 +369,13 @@ def shell(obj: AppContext, workdir: Path | None) -> None:
     _show_skipped(obj, skipped)
     _show_mounts(obj, host_workdir, mounted)
 
-    code = docker.run_container(IMAGE_NAME, host_workdir, mounted, ["bash"])
+    code = docker.run_container(
+        IMAGE_NAME,
+        host_workdir,
+        mounted,
+        ["bash"],
+        extra_args=config.docker_args,
+    )
     raise SystemExit(code)
 
 
@@ -387,6 +394,156 @@ def clean(obj: AppContext) -> None:
         obj.out().print(
             f"[yellow]Nothing to remove[/yellow] ({IMAGE_NAME} not found)."
         )
+
+
+def _print_hint(console: Console, title: str, lines: list[str]) -> None:
+    console.print(f"  [bold]{escape(title)}[/bold]")
+    for line in lines:
+        console.print(f"    {line}", markup=False)
+    console.print("")
+
+
+@main.group(name="local")  # ty: ignore[dynamic-function-decorator-return]
+def local_group() -> None:
+    """Check host services that the container can use."""
+
+
+@local_group.command()  # ty: ignore[dynamic-function-decorator-return]
+@click.pass_obj
+def ollama(obj: AppContext) -> None:
+    """Check a host Ollama server and show setup commands."""
+    console = obj.out()
+    config = obj.config
+    env = local.systemd_environment()
+    version = local.ollama_version()
+    gateway = local.bridge_gateway()
+    models: list[local.OllamaModel] = []
+    context: int | None = None
+    reachable = False
+
+    console.print("[bold]Ollama on the host[/bold]")
+    if version is None:
+        console.print(
+            f"  [red]not reachable[/red] at {escape(local.OLLAMA_URL)}"
+        )
+    else:
+        console.print(
+            f"  [green]running[/green] at {escape(local.OLLAMA_URL)} "
+            f"(version {escape(version)})"
+        )
+        models = local.ollama_models()
+        loaded = local.ollama_loaded()
+        context = local.context_length(loaded, env)
+        reachable = local.container_reachable(env, gateway)
+
+        if models:
+            names = ", ".join(
+                escape(model.name)
+                + ("" if model.supports_tools else " (no tools)")
+                for model in models
+            )
+            console.print(f"  [bold]models:[/bold] {names}")
+        else:
+            console.print("  [yellow]no models pulled[/yellow]")
+
+        if context is None:
+            console.print(
+                "  [yellow]context:[/yellow] not set "
+                f"(Ollama defaults to {local.DEFAULT_OLLAMA_CONTEXT_LENGTH})"
+            )
+        elif context < local.MIN_CONTEXT_LENGTH:
+            console.print(
+                f"  [yellow]context:[/yellow] {context} "
+                f"(needs {local.MIN_CONTEXT_LENGTH}+ for OpenCode)"
+            )
+        else:
+            console.print(f"  [bold]context:[/bold] {context}")
+
+        if reachable:
+            console.print(
+                f"  [green]container can reach it[/green] at "
+                f"{escape(gateway)}:11434"
+            )
+        else:
+            console.print(
+                f"  [yellow]container cannot reach it[/yellow] at "
+                f"{escape(gateway)}:11434"
+            )
+
+    host_access = local.docker_host_access(config.docker_args)
+    if host_access:
+        console.print(
+            "  [green]tether passes host access[/green] to the container"
+        )
+    else:
+        console.print(
+            "  [yellow]tether does not pass host access[/yellow] "
+            "to the container"
+        )
+
+    context_ok = context is not None and context >= local.MIN_CONTEXT_LENGTH
+    tool_models = [model for model in models if model.supports_tools]
+    ready = (
+        version is not None
+        and reachable
+        and host_access
+        and context_ok
+        and bool(tool_models)
+    )
+
+    console.print("")
+    if ready:
+        console.print(
+            "[green]Ready.[/green] In OpenCode, run /models and choose an "
+            "ollama/ model."
+        )
+        return
+
+    console.print("[bold]Next steps[/bold]")
+
+    if version is None:
+        _print_hint(console, "Start Ollama", ["ollama serve"])
+
+    env_lines: list[str] = []
+    if version is not None and not reachable:
+        env_lines.append('Environment="OLLAMA_HOST=0.0.0.0:11434"')
+    if version is not None and not context_ok:
+        env_lines.append('Environment="OLLAMA_CONTEXT_LENGTH=32768"')
+    if env_lines:
+        _print_hint(
+            console,
+            "Configure the Ollama service",
+            [
+                "sudo systemctl edit ollama",
+                "",
+                "# add under [Service]:",
+                *env_lines,
+                "",
+                "sudo systemctl daemon-reload",
+                "sudo systemctl restart ollama",
+            ],
+        )
+
+    if not host_access:
+        _print_hint(
+            console,
+            "Give the container access to the host",
+            [
+                f"Add to {config.path}:",
+                "",
+                "[docker]",
+                'extra_args = ["--add-host=host.docker.internal:host-gateway"]',
+            ],
+        )
+
+    if version is not None and not tool_models:
+        _print_hint(
+            console,
+            "Pull a tool-capable model",
+            ["ollama pull qwen3:8b"],
+        )
+
+    raise SystemExit(1)
 
 
 if __name__ == "__main__":  # pragma: no cover

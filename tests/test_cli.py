@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import tomllib
+from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 from click.testing import CliRunner
 
-from tether import cli, docker
+from tether import cli, docker, local
 from tether.cli import main
 from tether.config import Config, ConfigError
 
@@ -17,6 +18,7 @@ def _config(
     default_agent: str = "opencode",
     mounts: dict[str, list[str]] | None = None,
     args: dict[str, list[str]] | None = None,
+    docker_args: list[str] | None = None,
 ) -> Config:
     return Config(
         path=tmp_path / "config.toml",
@@ -27,6 +29,7 @@ def _config(
             else {"opencode": [], "claude": [], "antigravity": []}
         ),
         args=args or {},
+        docker_args=docker_args or [],
     )
 
 
@@ -44,6 +47,8 @@ def _stub_run(
         workdir: Path,
         mounts: list[tuple[str, str]],
         command: list[str],
+        *,
+        extra_args: Sequence[str] = (),
     ) -> int:
         calls.append(command)
         return 0
@@ -125,6 +130,8 @@ def test_shell_runs_bash(
         workdir: Path,
         mounts: list[tuple[str, str]],
         command: list[str],
+        *,
+        extra_args: Sequence[str] = (),
     ) -> int:
         calls.append(command)
         return 0
@@ -135,6 +142,38 @@ def test_shell_runs_bash(
 
     assert result.exit_code == 0
     assert calls == [["bash"]]
+
+
+@pytest.mark.parametrize("command", ["run", "shell"])
+def test_docker_extra_args_are_passed_through(
+    command: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: list[list[str]] = []
+    config = _config(
+        tmp_path,
+        docker_args=["--add-host=host.docker.internal:host-gateway"],
+    )
+    monkeypatch.setattr(cli, "load_config", lambda: config)
+    monkeypatch.setattr(cli, "_require_docker", lambda: None)
+    monkeypatch.setattr(cli, "_require_image", lambda: None)
+
+    def fake_run_container(
+        image: str,
+        workdir: Path,
+        mounts: list[tuple[str, str]],
+        args: list[str],
+        *,
+        extra_args: Sequence[str] = (),
+    ) -> int:
+        captured.append(list(extra_args))
+        return 0
+
+    monkeypatch.setattr(docker, "run_container", fake_run_container)
+
+    result = CliRunner().invoke(main, [command])
+
+    assert result.exit_code == 0
+    assert captured == [["--add-host=host.docker.internal:host-gateway"]]
 
 
 def test_build_calls_docker(
@@ -305,6 +344,8 @@ def test_version_does_not_load_config(
         ["info", "-h"],
         ["shell", "-h"],
         ["clean", "-h"],
+        ["local", "-h"],
+        ["local", "ollama", "-h"],
     ],
 )
 def test_help_matrix(
@@ -478,3 +519,134 @@ def test_build_rejects_removed_completion_flags(
 
     assert result.exit_code != 0
     assert "No such option" in result.output
+
+
+def _local_stubs(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    version: str | None = "0.40.18",
+    models: list[local.OllamaModel] | None = None,
+    context: int | None = 32768,
+    reachable: bool = True,
+    host_access: bool = True,
+) -> None:
+    monkeypatch.setattr(local, "systemd_environment", lambda: {})
+    monkeypatch.setattr(local, "ollama_version", lambda: version)
+    monkeypatch.setattr(local, "bridge_gateway", lambda: "172.17.0.1")
+    monkeypatch.setattr(
+        local,
+        "ollama_models",
+        lambda: (
+            models
+            if models is not None
+            else [local.OllamaModel("m", 262144, ("tools",))]
+        ),
+    )
+    monkeypatch.setattr(local, "ollama_loaded", lambda: [])
+    monkeypatch.setattr(local, "context_length", lambda loaded, env: context)
+    monkeypatch.setattr(
+        local, "container_reachable", lambda env, gateway: reachable
+    )
+    monkeypatch.setattr(local, "docker_host_access", lambda args: host_access)
+
+
+def test_local_ollama_ready(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli, "load_config", lambda: _config(tmp_path))
+    _local_stubs(monkeypatch)
+
+    result = CliRunner().invoke(main, ["local", "ollama"])
+
+    assert result.exit_code == 0
+    assert "Ready." in result.stdout
+
+
+def test_local_ollama_not_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli, "load_config", lambda: _config(tmp_path))
+    _local_stubs(monkeypatch, version=None)
+
+    result = CliRunner().invoke(main, ["local", "ollama"])
+
+    assert result.exit_code == 1
+    assert "not reachable" in result.stdout
+    assert "ollama serve" in result.stdout
+
+
+def test_local_ollama_reports_tether_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli, "load_config", lambda: _config(tmp_path))
+    _local_stubs(monkeypatch, host_access=False)
+
+    result = CliRunner().invoke(main, ["local", "ollama"])
+
+    assert result.exit_code == 1
+    assert "[docker]" in result.stdout
+    assert str(tmp_path / "config.toml") in result.stdout
+
+
+def test_local_ollama_reports_small_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli, "load_config", lambda: _config(tmp_path))
+    _local_stubs(monkeypatch, context=4096)
+
+    result = CliRunner().invoke(main, ["local", "ollama"])
+
+    assert result.exit_code == 1
+    assert "OLLAMA_CONTEXT_LENGTH" in result.stdout
+
+
+def test_local_ollama_reports_unreachable_container(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli, "load_config", lambda: _config(tmp_path))
+    _local_stubs(monkeypatch, reachable=False)
+
+    result = CliRunner().invoke(main, ["local", "ollama"])
+
+    assert result.exit_code == 1
+    assert "OLLAMA_HOST" in result.stdout
+
+
+def test_local_ollama_reports_missing_tool_model(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli, "load_config", lambda: _config(tmp_path))
+    _local_stubs(
+        monkeypatch,
+        models=[local.OllamaModel("embed", 2048, ("embedding",))],
+    )
+
+    result = CliRunner().invoke(main, ["local", "ollama"])
+
+    assert result.exit_code == 1
+    assert "ollama pull" in result.stdout
+
+
+def test_local_ollama_reports_no_models(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli, "load_config", lambda: _config(tmp_path))
+    _local_stubs(monkeypatch, models=[], context=None)
+
+    result = CliRunner().invoke(main, ["local", "ollama"])
+
+    assert result.exit_code == 1
+    assert "no models pulled" in result.stdout
+    assert "not set" in result.stdout
+    assert "ollama pull" in result.stdout
+
+
+def test_local_group_lists_ollama(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(cli, "load_config", lambda: _config(tmp_path))
+
+    result = CliRunner().invoke(main, ["local", "--help"])
+
+    assert result.exit_code == 0
+    assert "ollama" in result.output
