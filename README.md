@@ -205,7 +205,7 @@ To make a host Ollama server available to the container:
 
 3. Point OpenCode at it from `~/.config/opencode/opencode.jsonc`:
 
-   ```jsonc
+   ```json
    "providers": {
      "ollama": {
        "settings": { "baseURL": "http://host.docker.internal:11434/v1" }
